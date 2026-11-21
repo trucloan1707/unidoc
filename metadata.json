@@ -1,0 +1,6 @@
+{
+  "name": "UniDoc - Chợ Sách Sinh Viên Toàn Quốc",
+  "description": "Sàn thương mại điện tử mua bán sách giáo trình cũ cho sinh viên toàn quốc. Đánh giá ẩn danh, video/hình ảnh 5 sao, thanh đăng bài trung tâm và hệ thống danh hiệu hài hước.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
