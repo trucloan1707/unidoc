@@ -18,6 +18,8 @@ import {
   Heart,
   LogIn,
   UserPlus,
+  Lock,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { University } from '../types';
 import { MAJORS_LIST } from '../data/mockData';
@@ -30,6 +32,8 @@ interface NavbarProps {
   onSelectMajor: (major: string) => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
+  maxPrice: number;
+  onMaxPriceChange: (price: number) => void;
   cartCount: number;
   onOpenCart: () => void;
   onOpenChat: () => void;
@@ -48,6 +52,7 @@ interface NavbarProps {
   onOpenLogin?: () => void;
   onOpenRegister?: () => void;
   isLoggedIn?: boolean;
+  isAdmin?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -58,6 +63,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSelectMajor,
   searchQuery,
   onSearchChange,
+  maxPrice,
+  onMaxPriceChange,
   cartCount,
   onOpenCart,
   onOpenChat,
@@ -76,6 +83,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenLogin,
   onOpenRegister,
   isLoggedIn = false,
+  isAdmin = false,
 }) => {
   // Searchable university popover state
   const [isUniOpen, setIsUniOpen] = useState(false);
@@ -87,6 +95,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [majorSearch, setMajorSearch] = useState('');
   const majorRef = useRef<HTMLDivElement>(null);
 
+  // Price range slider popover state (0 - 200k)
+  const [isPriceOpen, setIsPriceOpen] = useState(false);
+  const priceRef = useRef<HTMLDivElement>(null);
+
   // Close dropdowns on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -96,10 +108,22 @@ export const Navbar: React.FC<NavbarProps> = ({
       if (majorRef.current && !majorRef.current.contains(event.target as Node)) {
         setIsMajorOpen(false);
       }
+      if (priceRef.current && !priceRef.current.contains(event.target as Node)) {
+        setIsPriceOpen(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const formatPriceCompact = (val: number) => {
+    if (val === 0) return '0đ';
+    return `${Math.round(val / 1000)}k`;
+  };
+
+  const formatVND = (val: number) => {
+    return new Intl.NumberFormat('vi-VN').format(val) + 'đ';
+  };
 
   const selectedUni = universities.find((u) => u.id === selectedUniversityId);
 
@@ -152,9 +176,11 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
               <button
                 onClick={onOpenAdminPanel}
-                className="hover:text-white transition-colors cursor-pointer text-sky-200 text-xs"
+                title={isAdmin ? 'Mở Bảng Quản Trị UniDoc' : 'Chỉ dành cho Quản trị viên UniDoc'}
+                className="hover:text-white transition-colors cursor-pointer text-sky-200 text-xs inline-flex items-center gap-1"
               >
-                Quản trị UniDoc
+                {!isAdmin && <Lock className="w-3 h-3 text-sky-300/80" />}
+                <span>Quản trị UniDoc</span>
               </button>
             </div>
 
@@ -378,12 +404,92 @@ export const Navbar: React.FC<NavbarProps> = ({
 
               <div className="hidden sm:block w-px h-5 bg-slate-300 dark:bg-zinc-700 shrink-0" />
 
-              {/* 3. Keyword Search Input */}
+              {/* 3. LỌC THEO GIÁ KÉO TỪ 0 ĐẾN 200K */}
+              <div className="relative shrink-0" ref={priceRef}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPriceOpen(!isPriceOpen);
+                    setIsUniOpen(false);
+                    setIsMajorOpen(false);
+                  }}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border sm:border-0 text-xs text-left cursor-pointer transition-colors w-full sm:w-auto ${
+                    maxPrice < 200000
+                      ? 'bg-sky-50 dark:bg-sky-950/60 border-sky-300 text-sky-700 dark:text-sky-300'
+                      : 'bg-white dark:bg-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-800 sm:bg-transparent sm:dark:bg-transparent border-slate-200 dark:border-zinc-700'
+                  }`}
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-[#4086ee] dark:text-sky-400 shrink-0" />
+                  <span className="font-bold text-slate-800 dark:text-white whitespace-nowrap">
+                    {maxPrice < 200000 ? `0–${formatPriceCompact(maxPrice)}` : 'Giá 0–200k'}
+                  </span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-300 shrink-0" />
+                </button>
+
+                {isPriceOpen && (
+                  <div className="absolute left-0 sm:right-0 sm:left-auto top-full mt-2 w-72 bg-white dark:bg-zinc-950 rounded-2xl shadow-2xl border border-slate-200 dark:border-zinc-800 p-4 z-50 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-800 dark:text-white">
+                        Lọc theo giá (0 – 200k)
+                      </span>
+                      <span className="text-xs font-extrabold text-[#4086ee] dark:text-sky-400">
+                        0đ – {formatVND(maxPrice)}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <input
+                        type="range"
+                        min={0}
+                        max={200000}
+                        step={5000}
+                        value={maxPrice}
+                        onChange={(e) => onMaxPriceChange(Number(e.target.value))}
+                        aria-label="Kéo chọn mức giá tối đa từ 0 đến 200k"
+                        className="w-full accent-[#4086ee] cursor-pointer"
+                      />
+                      <div className="flex items-center justify-between text-[10px] font-semibold text-slate-400 dark:text-zinc-400">
+                        <span>0đ</span>
+                        <span>50k</span>
+                        <span>100k</span>
+                        <span>150k</span>
+                        <span>200k</span>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-100 dark:border-zinc-800">
+                      {[
+                        { label: '≤ 30k', value: 30000 },
+                        { label: '≤ 50k', value: 50000 },
+                        { label: '≤ 100k', value: 100000 },
+                        { label: 'Tất cả (0–200k)', value: 200000 },
+                      ].map((preset) => (
+                        <button
+                          key={preset.value}
+                          type="button"
+                          onClick={() => onMaxPriceChange(preset.value)}
+                          className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${
+                            maxPrice === preset.value
+                              ? 'bg-[#4086ee] text-white border-[#4086ee]'
+                              : 'bg-slate-50 dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 border-slate-200 dark:border-zinc-700 hover:border-sky-400'
+                          }`}
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="hidden sm:block w-px h-5 bg-slate-300 dark:bg-zinc-700 shrink-0" />
+
+              {/* 4. Keyword Search Input */}
               <div className="relative flex-1 flex items-center min-w-[130px]">
                 <Search className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-400 absolute left-2 pointer-events-none" />
                 <input
                   type="text"
-                  placeholder="Tìm tên sách, mã môn, ISBN..."
+                  placeholder="Tìm tên sách, tác giả, môn học..."
                   value={searchQuery}
                   onChange={(e) => onSearchChange(e.target.value)}
                   className="w-full pl-7 pr-6 py-1.5 bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-400 focus:outline-hidden"
@@ -502,6 +608,19 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Store className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
               <span>Kênh Người Bán</span>
             </button>
+
+            {/* Mobile Admin shortcut (strictly visible only to authorized Admin) */}
+            {isLoggedIn && isAdmin && (
+              <button
+                type="button"
+                onClick={onOpenAdminPanel}
+                title="Quản trị UniDoc"
+                className="md:hidden inline-flex items-center gap-1 px-2.5 py-2 rounded-xl bg-[#edf8fe] dark:bg-sky-950 border border-[#b9e7ff] dark:border-sky-800 text-[#0860c9] dark:text-sky-300 text-xs font-bold cursor-pointer"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Quản trị</span>
+              </button>
+            )}
 
             {/* Show Login / Register ONLY when NOT logged in; hide completely after login */}
             {!isLoggedIn ? (

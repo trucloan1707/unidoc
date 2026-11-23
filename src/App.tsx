@@ -82,6 +82,57 @@ export default function App() {
     }
   });
   const [authPromptAction, setAuthPromptAction] = useState<string | null>(null);
+  const [currentUserEmail, setCurrentUserEmail] = useState<string>(() => {
+    try {
+      return localStorage.getItem('unidoc_current_email') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+
+  const verifyAdminStatus = async (emailToCheck: string) => {
+    const normalized = emailToCheck.trim().toLowerCase();
+    if (!normalized) {
+      setIsAdmin(false);
+      return;
+    }
+    try {
+      const res = await fetch('/api/auth/check-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: normalized }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setIsAdmin(Boolean(data.isAdmin));
+      } else {
+        setIsAdmin(false);
+      }
+    } catch {
+      setIsAdmin(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isLoggedIn && currentUserEmail) {
+      verifyAdminStatus(currentUserEmail);
+    } else {
+      setIsAdmin(false);
+    }
+  }, [isLoggedIn, currentUserEmail]);
+
+  const scrollToTop = () => {
+    try {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch {
+      window.scrollTo(0, 0);
+    }
+  };
+
+  useEffect(() => {
+    scrollToTop();
+  }, [currentNavTab]);
 
   const requireAuth = (actionLabel: string, callback: () => void) => {
     if (!isLoggedIn) {
@@ -91,15 +142,33 @@ export default function App() {
     callback();
   };
 
-  const handleSetLoggedIn = (value: boolean) => {
+  const handleSetLoggedIn = (value: boolean, emailValue?: string) => {
     setIsLoggedIn(value);
     try {
       localStorage.setItem('unidoc_is_logged_in', value ? 'true' : 'false');
+      if (value && emailValue) {
+        const normalized = emailValue.trim().toLowerCase();
+        setCurrentUserEmail(normalized);
+        localStorage.setItem('unidoc_current_email', normalized);
+      } else if (!value) {
+        setCurrentUserEmail('');
+        setIsAdmin(false);
+        localStorage.removeItem('unidoc_current_email');
+      }
     } catch {}
   };
 
-  // App core data state
-  const [books, setBooks] = useState<Book[]>(INITIAL_BOOKS);
+  // App core data state (excluding listings removed by administrator)
+  const [books, setBooks] = useState<Book[]>(() => {
+    try {
+      const deletedRaw = localStorage.getItem('unidoc_deleted_book_ids');
+      const deletedIds: string[] = deletedRaw ? JSON.parse(deletedRaw) : [];
+      if (Array.isArray(deletedIds) && deletedIds.length > 0) {
+        return INITIAL_BOOKS.filter((b) => !deletedIds.includes(b.id));
+      }
+    } catch {}
+    return INITIAL_BOOKS;
+  });
   const [reviews, setReviews] = useState<BookReview[]>(INITIAL_REVIEWS);
   const [orders, setOrders] = useState<any[]>(INITIAL_ORDERS);
   const [notifications, setNotifications] = useState<AppNotification[]>(INITIAL_NOTIFICATIONS);
@@ -124,7 +193,7 @@ export default function App() {
   const [selectedMajor, setSelectedMajor] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [priceFilter, setPriceFilter] = useState<'all' | 'under_50k' | 'under_30k'>('all');
+  const [maxPrice, setMaxPrice] = useState<number>(200000);
   const [sortBy, setSortBy] = useState<'default' | 'price_asc' | 'price_desc' | 'rating'>('default');
 
   // Modals visibility
@@ -161,9 +230,8 @@ export default function App() {
     if (selectedCategory !== 'all' && book.category !== selectedCategory) {
       return false;
     }
-    // 4. Lọc theo mức giá
-    if (priceFilter === 'under_50k' && book.price > 50000) return false;
-    if (priceFilter === 'under_30k' && book.price > 30000) return false;
+    // 4. Lọc theo mức giá (0 - 200k)
+    if (maxPrice < 200000 && book.price > maxPrice) return false;
     // 5. Tìm kiếm từ khóa
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
@@ -172,8 +240,17 @@ export default function App() {
       const matchMajor = book.major.toLowerCase().includes(q);
       const matchUni = book.universityName.toLowerCase().includes(q);
       const matchSubject = (book.subjectCode || '').toLowerCase().includes(q);
+      const matchSubjectName = (book.subjectName || '').toLowerCase().includes(q);
       const matchIsbn = (book.isbn || '').toLowerCase().includes(q);
-      if (!matchTitle && !matchAuthor && !matchMajor && !matchUni && !matchSubject && !matchIsbn) {
+      if (
+        !matchTitle &&
+        !matchAuthor &&
+        !matchMajor &&
+        !matchUni &&
+        !matchSubject &&
+        !matchSubjectName &&
+        !matchIsbn
+      ) {
         return false;
       }
     }
@@ -264,6 +341,61 @@ export default function App() {
     setBooks(books.filter((b) => b.id !== bookId));
   };
 
+  const handleAdminDeleteBook = async (bookId: string): Promise<boolean> => {
+    if (!isLoggedIn || !isAdmin || !currentUserEmail) {
+      return false;
+    }
+
+    try {
+      const authRes = await fetch('/api/admin/authorize-action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: currentUserEmail }),
+      });
+      if (!authRes.ok) {
+        setIsAdmin(false);
+        return false;
+      }
+      const authData = await authRes.json();
+      if (!authData.authorized) {
+        setIsAdmin(false);
+        return false;
+      }
+    } catch {
+      return false;
+    }
+
+    const removedBook = books.find((b) => b.id === bookId);
+    setBooks((prev) => prev.filter((b) => b.id !== bookId));
+    setCartItems((prev) => prev.filter((item) => item.book.id !== bookId));
+    setLikedBookIds((prev) => prev.filter((id) => id !== bookId));
+    setViewedBooks((prev) => prev.filter((b) => b.id !== bookId));
+
+    try {
+      const deletedRaw = localStorage.getItem('unidoc_deleted_book_ids');
+      const deletedIds: string[] = deletedRaw ? JSON.parse(deletedRaw) : [];
+      const nextDeleted = Array.isArray(deletedIds)
+        ? Array.from(new Set([...deletedIds, bookId]))
+        : [bookId];
+      localStorage.setItem('unidoc_deleted_book_ids', JSON.stringify(nextDeleted));
+    } catch {}
+
+    if (removedBook) {
+      const notif: AppNotification = {
+        id: `notif_${Date.now()}`,
+        title: 'Quản trị: Đã xóa tin đăng',
+        message: `Tin đăng "${removedBook.title}" đã được quản trị viên gỡ bỏ khỏi UniDoc.`,
+        type: 'order',
+        createdAt: 'Vừa xong',
+        read: false,
+        relatedBookTitle: removedBook.title,
+      };
+      setNotifications((prev) => [notif, ...prev]);
+    }
+
+    return true;
+  };
+
   const handleCheckoutSuccess = () => {
     // Generate order in orders list
     if (cartItems.length > 0) {
@@ -318,21 +450,41 @@ export default function App() {
     return (
       <LoginScreen
         onSwitchToRegister={() => setAuthScreen('register')}
-        onLoginSuccess={(loggedInEmail) => {
+        onLoginSuccess={async (loggedInEmail) => {
+          const normalized = loggedInEmail.trim().toLowerCase();
           try {
+            const accRaw = localStorage.getItem('unidoc_registered_accounts');
+            const accList = accRaw ? JSON.parse(accRaw) : [];
+            const matchedAccount = Array.isArray(accList)
+              ? accList.find(
+                  (acc: { email?: string }) =>
+                    (acc.email || '').toLowerCase() === normalized
+                )
+              : null;
+
             const raw = localStorage.getItem('unidoc_user_profile');
             const prev = raw ? JSON.parse(raw) : {};
+            const resolvedUsername =
+              matchedAccount?.username ||
+              (prev.email?.toLowerCase() === normalized ? prev.username || prev.name : '') ||
+              normalized.split('@')[0];
+
             localStorage.setItem(
               'unidoc_user_profile',
               JSON.stringify({
-                name: prev.name || 'Nguyễn Minh Anh',
+                name: resolvedUsername,
+                username: resolvedUsername,
                 avatar: prev.avatar || '',
-                email: loggedInEmail || prev.email || 'minhanh@edu.vn',
-                university: prev.university || 'ĐH Kinh tế TP.HCM',
+                email: normalized,
+                university:
+                  matchedAccount?.universityName ||
+                  (prev.email?.toLowerCase() === normalized ? prev.university : '') ||
+                  'ĐH Kinh tế TP.HCM',
               })
             );
           } catch {}
-          handleSetLoggedIn(true);
+          handleSetLoggedIn(true, normalized);
+          await verifyAdminStatus(normalized);
           setAuthScreen(null);
           setCurrentNavTab('home');
         }}
@@ -346,21 +498,24 @@ export default function App() {
       <RegisterScreen
         universities={UNIVERSITIES}
         onSwitchToLogin={() => setAuthScreen('login')}
-        onCompleteRegister={(data) => {
+        onCompleteRegister={async (data) => {
+          const normalized = data.email.trim().toLowerCase();
           try {
             const raw = localStorage.getItem('unidoc_user_profile');
             const prev = raw ? JSON.parse(raw) : {};
             localStorage.setItem(
               'unidoc_user_profile',
               JSON.stringify({
-                name: prev.name || 'Nguyễn Minh Anh',
+                name: data.username,
+                username: data.username,
                 avatar: prev.avatar || '',
-                email: data.email || prev.email || 'minhanh@edu.vn',
-                university: data.universityName || prev.university || 'ĐH Kinh tế TP.HCM',
+                email: normalized,
+                university: data.universityName || 'ĐH Kinh tế TP.HCM',
               })
             );
           } catch {}
-          handleSetLoggedIn(true);
+          handleSetLoggedIn(true, normalized);
+          await verifyAdminStatus(normalized);
           setAuthScreen(null);
           setCurrentNavTab('home');
         }}
@@ -380,6 +535,8 @@ export default function App() {
         onSelectMajor={(m) => setSelectedMajor(m)}
         searchQuery={searchQuery}
         onSearchChange={(q) => setSearchQuery(q)}
+        maxPrice={maxPrice}
+        onMaxPriceChange={(price) => setMaxPrice(price)}
         cartCount={isLoggedIn ? cartItems.reduce((acc, it) => acc + it.quantity, 0) : 0}
         onOpenCart={() => requireAuth('mở giỏ hàng', () => setIsCartOpen(true))}
         onOpenChat={() =>
@@ -400,6 +557,7 @@ export default function App() {
         }
         currentNavTab={currentNavTab}
         onNavigateTab={(tab) => {
+          scrollToTop();
           if (tab === 'home') {
             setCurrentNavTab('home');
             return;
@@ -420,6 +578,7 @@ export default function App() {
         onOpenLogin={() => setAuthScreen('login')}
         onOpenRegister={() => setAuthScreen('register')}
         isLoggedIn={isLoggedIn}
+        isAdmin={isAdmin}
       />
 
       {/* VIEW ROUTING: HOME VIEW VS FAVORITES VIEW VS PERSONAL PROFILE VIEW */}
@@ -431,7 +590,10 @@ export default function App() {
           onSelectBook={(b) => handleSelectBook(b)}
           onAddToCart={(b, e) => handleAddToCart(b, e)}
           onRemoveFavorite={(id, e) => handleToggleLike(id, e)}
-          onExploreDocuments={() => setCurrentNavTab('home')}
+          onExploreDocuments={() => {
+            scrollToTop();
+            setCurrentNavTab('home');
+          }}
         />
       ) : isLoggedIn && currentNavTab === 'profile' ? (
         /* PERSONAL PROFILE VIEW WITH ALL REQUESTED SECTIONS:
@@ -454,8 +616,14 @@ export default function App() {
           onOpenTitlesGuide={() => setIsTitlesGuideOpen(true)}
           onOpenVerification={() => setIsVerificationOpen(true)}
           onOpenSellerDashboard={() => setIsSellerDashboardOpen(true)}
-          onNavigateFavorites={() => setCurrentNavTab('favorites')}
-          onBackToHome={() => setCurrentNavTab('home')}
+          onNavigateFavorites={() => {
+            scrollToTop();
+            setCurrentNavTab('favorites');
+          }}
+          onBackToHome={() => {
+            scrollToTop();
+            setCurrentNavTab('home');
+          }}
           onOpenChatWithSeller={(b) => handleStartChatWithSeller(b)}
           onLogout={() => {
             handleSetLoggedIn(false);
@@ -551,18 +719,19 @@ export default function App() {
           {/* CENTRALIZED POST TOOLBAR ("Thanh công cụ đăng bài nằm ở chính giữa") */}
           <section className="-mt-6 relative z-20">
             <CenteredPostBar
-              onOpenPostModal={() =>
-                requireAuth('đăng bán sách và tài liệu', () => setIsPostModalOpen(true))
-              }
+              onOpenPostModal={() => {
+                scrollToTop();
+                requireAuth('đăng bán sách và tài liệu', () => setIsPostModalOpen(true));
+              }}
               onOpenTitlesGuide={() =>
                 requireAuth('xem bảng Danh hiệu', () => setIsTitlesGuideOpen(true))
               }
               onQuickFilter50k={() =>
                 requireAuth('lọc sách ưu đãi dưới 50.000đ', () =>
-                  setPriceFilter(priceFilter === 'under_50k' ? 'all' : 'under_50k')
+                  setMaxPrice(maxPrice === 50000 ? 200000 : 50000)
                 )
               }
-              activeFilter={priceFilter}
+              activeFilter={maxPrice === 50000 ? 'under_50k' : 'all'}
               totalBooksCount={books.length}
             />
           </section>
@@ -570,7 +739,10 @@ export default function App() {
           {/* Main Content Area */}
           <main className="max-w-7xl mx-auto px-3 sm:px-6 py-4 flex-1 w-full space-y-6">
             {/* Active Search & Filter Indicators */}
-            {(selectedUniversityId !== 'all' || selectedMajor !== 'all' || searchQuery) && (
+            {(selectedUniversityId !== 'all' ||
+              selectedMajor !== 'all' ||
+              searchQuery ||
+              maxPrice < 200000) && (
               <div className="bg-sky-50 dark:bg-zinc-950 border border-sky-200 dark:border-zinc-800 p-3 rounded-2xl flex flex-wrap items-center justify-between gap-2 text-xs">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-bold text-sky-900 dark:text-sky-300">Bộ lọc đang áp dụng:</span>
@@ -597,6 +769,17 @@ export default function App() {
                       </button>
                     </span>
                   )}
+                  {maxPrice < 200000 && (
+                    <span className="bg-white dark:bg-zinc-900 border border-sky-300 dark:border-zinc-700 px-2.5 py-1 rounded-lg text-sky-800 dark:text-white font-semibold flex items-center gap-1">
+                      Giá: 0đ – {new Intl.NumberFormat('vi-VN').format(maxPrice)}đ
+                      <button
+                        onClick={() => setMaxPrice(200000)}
+                        className="hover:text-rose-600 ml-1 cursor-pointer font-bold"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  )}
                   {searchQuery && (
                     <span className="bg-white dark:bg-zinc-900 border border-sky-300 dark:border-zinc-700 px-2.5 py-1 rounded-lg text-sky-800 dark:text-white font-semibold flex items-center gap-1">
                       Từ khóa: "{searchQuery}"
@@ -615,7 +798,7 @@ export default function App() {
                     setSelectedUniversityId('all');
                     setSelectedMajor('all');
                     setSelectedCategory('all');
-                    setPriceFilter('all');
+                    setMaxPrice(200000);
                     setSearchQuery('');
                   }}
                   className="font-bold text-sky-700 dark:text-sky-400 hover:text-sky-900 dark:hover:text-sky-200 underline cursor-pointer"
@@ -703,39 +886,57 @@ export default function App() {
               </div>
 
               {/* Sub-filtering & Sorting Bar */}
-              <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-zinc-950 p-3 rounded-2xl border border-slate-200/80 dark:border-zinc-800">
-                <div className="flex items-center gap-2 flex-wrap text-xs">
-                  <span className="font-bold text-slate-500 dark:text-zinc-300 flex items-center gap-1">
-                    <Filter className="w-3.5 h-3.5" /> Lọc nhanh:
-                  </span>
-                  <button
-                    onClick={() =>
-                      setPriceFilter(priceFilter === 'under_50k' ? 'all' : 'under_50k')
-                    }
-                    className={`px-2.5 py-1 rounded-lg border font-semibold cursor-pointer ${
-                      priceFilter === 'under_50k'
-                        ? 'bg-amber-400 text-slate-950 border-amber-500 font-bold'
-                        : 'border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-900 text-slate-700 dark:text-white hover:bg-slate-100 dark:hover:bg-zinc-800'
-                    }`}
-                  >
-                    Dưới 50.000đ ⚡
-                  </button>
-                  <button
-                    onClick={() =>
-                      setPriceFilter(priceFilter === 'under_30k' ? 'all' : 'under_30k')
-                    }
-                    className={`px-2.5 py-1 rounded-lg border font-semibold cursor-pointer ${
-                      priceFilter === 'under_30k'
-                        ? 'bg-amber-400 text-slate-950 border-amber-500 font-bold'
-                        : 'border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-900 text-slate-700 dark:text-white hover:bg-slate-100 dark:hover:bg-zinc-800'
-                    }`}
-                  >
-                    Dưới 30.000đ (Tiết kiệm khủng)
-                  </button>
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white dark:bg-zinc-950 p-3.5 rounded-2xl border border-slate-200/80 dark:border-zinc-800">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap text-xs">
+                    <span className="font-bold text-slate-500 dark:text-zinc-300 flex items-center gap-1">
+                      <Filter className="w-3.5 h-3.5" /> Lọc nhanh:
+                    </span>
+                    <button
+                      onClick={() => setMaxPrice(maxPrice === 50000 ? 200000 : 50000)}
+                      className={`px-2.5 py-1 rounded-lg border font-semibold cursor-pointer ${
+                        maxPrice === 50000
+                          ? 'bg-amber-400 text-slate-950 border-amber-500 font-bold'
+                          : 'border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-900 text-slate-700 dark:text-white hover:bg-slate-100 dark:hover:bg-zinc-800'
+                      }`}
+                    >
+                      Dưới 50.000đ ⚡
+                    </button>
+                    <button
+                      onClick={() => setMaxPrice(maxPrice === 30000 ? 200000 : 30000)}
+                      className={`px-2.5 py-1 rounded-lg border font-semibold cursor-pointer ${
+                        maxPrice === 30000
+                          ? 'bg-amber-400 text-slate-950 border-amber-500 font-bold'
+                          : 'border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-900 text-slate-700 dark:text-white hover:bg-slate-100 dark:hover:bg-zinc-800'
+                      }`}
+                    >
+                      Dưới 30.000đ
+                    </button>
+                  </div>
+
+                  {/* Interactive 0 - 200k Price Range Slider */}
+                  <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-[#edf8fe] dark:bg-zinc-900 border border-[#b9e7ff] dark:border-zinc-700 text-xs flex-1 max-w-md">
+                    <span className="font-bold text-[#0860c9] dark:text-sky-400 whitespace-nowrap">
+                      Giá: 0đ – {maxPrice === 0 ? '0đ' : `${Math.round(maxPrice / 1000)}k`}
+                    </span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={200000}
+                      step={5000}
+                      value={maxPrice}
+                      onChange={(e) => setMaxPrice(Number(e.target.value))}
+                      aria-label="Lọc theo giá từ 0 đến 200k"
+                      className="flex-1 min-w-[110px] accent-[#4086ee] cursor-pointer"
+                    />
+                    <span className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400 whitespace-nowrap">
+                      200k
+                    </span>
+                  </div>
                 </div>
 
                 {/* Sorter */}
-                <div className="flex items-center gap-2 text-xs">
+                <div className="flex items-center gap-2 text-xs shrink-0">
                   <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-300" />
                   <span className="text-slate-500 dark:text-zinc-300">Sắp xếp:</span>
                   <select
@@ -764,14 +965,14 @@ export default function App() {
                     Không tìm thấy cuốn giáo trình phù hợp
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-zinc-400 max-w-sm mx-auto">
-                    Bạn có thể thử tìm theo tên môn, mã môn, hoặc đăng bài tìm mua để bạn học cùng trường pass lại nhé!
+                    Bạn có thể thử tìm theo tên sách, tên môn học, điều chỉnh khoảng giá hoặc đăng bài tìm mua nhé!
                   </p>
                   <button
                     onClick={() => {
                       setSelectedUniversityId('all');
                       setSelectedMajor('all');
                       setSelectedCategory('all');
-                      setPriceFilter('all');
+                      setMaxPrice(200000);
                       setSearchQuery('');
                     }}
                     className="px-4 py-2 bg-sky-600 text-white rounded-xl text-xs font-bold hover:bg-sky-700 transition-colors cursor-pointer"
@@ -824,16 +1025,22 @@ export default function App() {
       {/* PRIMARY BOTTOM TOOLBAR (4 evenly divided tabs: Trang chủ, Đăng bài, Yêu thích, Cá nhân) */}
       <BottomNav
         currentTab={isLoggedIn ? currentNavTab : 'home'}
-        onNavigateHome={() => setCurrentNavTab('home')}
-        onNavigateFavorites={() =>
-          requireAuth('xem Danh sách yêu thích', () => setCurrentNavTab('favorites'))
-        }
-        onNavigateProfile={() =>
-          requireAuth('truy cập Trang cá nhân', () => setCurrentNavTab('profile'))
-        }
-        onOpenPostBook={() =>
-          requireAuth('đăng bán sách và tài liệu', () => setIsPostModalOpen(true))
-        }
+        onNavigateHome={() => {
+          scrollToTop();
+          setCurrentNavTab('home');
+        }}
+        onNavigateFavorites={() => {
+          scrollToTop();
+          requireAuth('xem Danh sách yêu thích', () => setCurrentNavTab('favorites'));
+        }}
+        onNavigateProfile={() => {
+          scrollToTop();
+          requireAuth('truy cập Trang cá nhân', () => setCurrentNavTab('profile'));
+        }}
+        onOpenPostBook={() => {
+          scrollToTop();
+          requireAuth('đăng bán sách và tài liệu', () => setIsPostModalOpen(true));
+        }}
         favoritesCount={isLoggedIn ? likedBookIds.length : 0}
       />
 
@@ -869,7 +1076,7 @@ export default function App() {
               Có thắc mắc hoặc cần giải đáp tranh chấp nhận sách tại KTX?
             </p>
             <div className="mt-2 text-white font-bold">
-              hotro@unidoc.edu.vn • 1900 6868
+              unidoc819@gmail.com • 1900 6868
             </div>
             <div className="mt-2 text-[11px] text-slate-400 dark:text-zinc-400">
               Thời gian hỗ trợ: 7:00 - 22:00 hàng ngày (kể cả mùa thi)
@@ -971,22 +1178,26 @@ export default function App() {
         onDeleteBook={(id) => handleDeleteMyBook(id)}
       />
 
-      {/* 10. Admin Moderation Panel */}
+      {/* 10. Admin Moderation Panel (Only authorized administrator can view/use) */}
       <AdminPanelModal
         isOpen={isAdminPanelOpen}
+        isAdmin={isAdmin}
         onClose={() => setIsAdminPanelOpen(false)}
-        verifications={verifications}
-        onApproveVerification={(id) =>
+        verifications={isAdmin ? verifications : []}
+        onApproveVerification={(id) => {
+          if (!isAdmin) return;
           setVerifications(
             verifications.map((v) => (v.id === id ? { ...v, status: 'approved' } : v))
-          )
-        }
-        onRejectVerification={(id) =>
+          );
+        }}
+        onRejectVerification={(id) => {
+          if (!isAdmin) return;
           setVerifications(
             verifications.map((v) => (v.id === id ? { ...v, status: 'rejected' } : v))
-          )
-        }
-        books={books}
+          );
+        }}
+        books={isAdmin ? books : []}
+        onDeleteBook={handleAdminDeleteBook}
       />
 
       {/* 11. Auth Required Modal for unauthenticated interactions */}

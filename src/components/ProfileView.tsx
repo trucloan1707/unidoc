@@ -34,6 +34,7 @@ import {
 
 interface UserProfile {
   name: string;
+  username?: string;
   email: string;
   university: string;
   avatar: string;
@@ -178,7 +179,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   const [profile, setProfile] = useState<UserProfile>(() => {
     const fallback: UserProfile = {
-      name: 'Nguyễn Minh Anh',
+      name: 'sinhvien_unidoc',
+      username: 'sinhvien_unidoc',
       email: 'minhanh@edu.vn',
       university: 'ĐH Kinh tế TP.HCM',
       avatar: DEFAULT_AVATAR,
@@ -187,7 +189,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       const saved = localStorage.getItem('unidoc_user_profile');
       if (saved) {
         const parsed = JSON.parse(saved);
-        return { ...fallback, ...parsed };
+        const resolvedUsername = parsed.username || parsed.name || fallback.name;
+        return {
+          ...fallback,
+          ...parsed,
+          name: resolvedUsername,
+          username: resolvedUsername,
+        };
       }
     } catch {}
     return fallback;
@@ -308,8 +316,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanedUsername = (draftProfile.username ?? draftProfile.name).trim() || 'sinhvien_unidoc';
     const updated: UserProfile = {
-      name: draftProfile.name.trim() || 'Nguyễn Minh Anh',
+      name: cleanedUsername,
+      username: cleanedUsername,
       email: draftProfile.email.trim() || 'minhanh@edu.vn',
       university: draftProfile.university.trim() || 'ĐH Kinh tế TP.HCM',
       avatar: draftProfile.avatar || profile.avatar,
@@ -748,7 +758,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <div className="p-3.5 rounded-2xl bg-[#4086ee] text-white text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <div className="font-bold">Tổng đài hỗ trợ sinh viên UniDoc</div>
-                <div className="text-sky-100">hotro@unidoc.edu.vn · 1900 6868 (7:00 – 22:00)</div>
+                <div className="text-sky-100">unidoc819@gmail.com · 1900 6868 (7:00 – 22:00)</div>
               </div>
               <button
                 type="button"
@@ -930,7 +940,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
                   <div className="min-w-0 space-y-0.5">
                     <h2 className="text-lg sm:text-xl font-black text-[#0860c9] dark:text-white truncate">
-                      {profile.name}
+                      {profile.username || profile.name}
                     </h2>
                     <div className="text-xs sm:text-sm text-[#5b728f] dark:text-zinc-400 truncate">
                       {profile.email}
@@ -1285,12 +1295,19 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-[#0860c9] dark:text-zinc-300 mb-1">
-                  Họ và tên
+                  Username
                 </label>
                 <input
                   type="text"
-                  value={draftProfile.name}
-                  onChange={(e) => setDraftProfile({ ...draftProfile, name: e.target.value })}
+                  value={draftProfile.username ?? draftProfile.name}
+                  onChange={(e) =>
+                    setDraftProfile({
+                      ...draftProfile,
+                      name: e.target.value,
+                      username: e.target.value,
+                    })
+                  }
+                  placeholder="Nhập username của bạn"
                   className="w-full px-3.5 py-2.5 rounded-xl bg-[#edf8fe]/60 dark:bg-zinc-900 border border-[#b9e7ff] dark:border-zinc-700 text-sm text-[#0860c9] dark:text-white focus:outline-hidden focus:border-[#4086ee]"
                 />
               </div>

@@ -50,6 +50,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({
   const [isVideoActive, setIsVideoActive] = useState(false);
   const [reviewFilter, setReviewFilter] = useState<'all' | 'with_media' | 'anonymous' | '5star'>('all');
   const [selectedReviewVideo, setSelectedReviewVideo] = useState<string | null>(null);
+  const [selectedReviewImage, setSelectedReviewImage] = useState<string | null>(null);
 
   if (!book) return null;
 
@@ -543,27 +544,35 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({
                     {(rev.images.length > 0 || rev.videoUrl) && (
                       <div className="flex items-center gap-2 overflow-x-auto pt-1">
                         {rev.images.map((img, idx) => (
-                          <a
+                          <button
                             key={idx}
-                            href={img}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="relative w-16 h-16 rounded-xl overflow-hidden border border-slate-200 dark:border-zinc-700 shrink-0 hover:opacity-90"
+                            type="button"
+                            onClick={() => setSelectedReviewImage(img)}
+                            className="relative w-16 h-16 rounded-xl overflow-hidden border border-slate-200 dark:border-zinc-700 shrink-0 hover:opacity-90 cursor-pointer"
                           >
-                            <img src={img} alt="review-proof" className="w-full h-full object-cover" />
-                          </a>
+                            <img src={img} alt={`Ảnh đánh giá ${idx + 1}`} className="w-full h-full object-cover" />
+                          </button>
                         ))}
 
                         {rev.videoUrl && (
                           <button
+                            type="button"
                             onClick={() => setSelectedReviewVideo(rev.videoUrl!)}
                             className="relative w-24 h-16 rounded-xl overflow-hidden border border-sky-400 bg-slate-900 shrink-0 flex items-center justify-center group cursor-pointer"
                           >
-                            <img
-                              src={rev.videoThumbnail || rev.images[0]}
-                              alt="video-thumb"
-                              className="w-full h-full object-cover opacity-60"
-                            />
+                            {rev.videoThumbnail || rev.images[0] ? (
+                              <img
+                                src={rev.videoThumbnail || rev.images[0]}
+                                alt="video-thumb"
+                                className="w-full h-full object-cover opacity-60"
+                              />
+                            ) : (
+                              <video
+                                src={rev.videoUrl}
+                                muted
+                                className="w-full h-full object-cover opacity-60"
+                              />
+                            )}
                             <div className="absolute inset-0 flex items-center justify-center">
                               <span className="p-1 rounded-full bg-sky-500 text-white shadow-md group-hover:scale-110 transition-transform">
                                 <Play className="w-3.5 h-3.5 fill-white" />
@@ -603,6 +612,32 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Image Lightbox Modal */}
+        {selectedReviewImage && (
+          <div
+            onClick={() => setSelectedReviewImage(null)}
+            className="fixed inset-0 z-60 bg-black/85 flex items-center justify-center p-4"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="relative max-w-2xl w-full bg-zinc-950 rounded-2xl overflow-hidden border border-white/10"
+            >
+              <button
+                type="button"
+                onClick={() => setSelectedReviewImage(null)}
+                className="absolute top-3 right-3 p-1.5 rounded-full bg-black/60 hover:bg-black/80 text-white z-10 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <img
+                src={selectedReviewImage}
+                alt="Ảnh đánh giá chi tiết"
+                className="w-full max-h-[80vh] object-contain mx-auto"
+              />
+            </div>
+          </div>
+        )}
 
         {/* Video Player Lightbox Modal */}
         {selectedReviewVideo && (

@@ -15,14 +15,16 @@ import {
   Sparkles,
   Clock,
   RefreshCw,
-  AlertTriangle,
   CheckCircle2,
+  User,
+  Loader2,
 } from 'lucide-react';
 
 interface RegisterScreenProps {
   universities: University[];
   onSwitchToLogin: () => void;
   onCompleteRegister: (data: {
+    username: string;
     universityName: string;
     studentId: string;
     email: string;
@@ -152,6 +154,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
   // Step 1 fields
+  const [username, setUsername] = useState('');
   const [universityId, setUniversityId] = useState('');
   const [studentId, setStudentId] = useState('');
   const [email, setEmail] = useState('');
@@ -161,72 +164,112 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [agreedTerms, setAgreedTerms] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
 
-  // Step 2 OTP & 60s countdown state
+  // Step 2 OTP & 60s countdown state (verified on server)
   const [otpCode, setOtpCode] = useState('');
-  const [activeOtp, setActiveOtp] = useState<string | null>(null);
-  const [expiredOtp, setExpiredOtp] = useState<string | null>(null);
+  const [normalizedVerifiedEmail, setNormalizedVerifiedEmail] = useState('');
   const [secondsLeft, setSecondsLeft] = useState<number>(60);
+  const [isOtpActive, setIsOtpActive] = useState<boolean>(false);
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const [resendCount, setResendCount] = useState<number>(0);
   const [resendNotice, setResendNotice] = useState<string | null>(null);
 
   const selectedUniversity = universities.find((u) => u.id === universityId);
-  const eduVnRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.edu\.vn$/i;
-  const trimmedEmail = email.trim().toLowerCase();
-  const isEduVnEmail = eduVnRegex.test(trimmedEmail);
 
-  const generateNewOtp = () => {
-    let code = String(Math.floor(100000 + Math.random() * 900000));
-    while (code === activeOtp || code === expiredOtp) {
-      code = String(Math.floor(100000 + Math.random() * 900000));
-    }
-    return code;
-  };
+  // Strict .edu.vn format check without extra whitespace
+  const hasExtraWhitespace = email !== email.trim() || /\s/.test(email);
+  const eduVnRegex =
+    /^[a-z0-9](?:[a-z0-9._%+-]*[a-z0-9])?@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\.edu\.vn$/i;
+  const normalizedEmailInput = email.toLowerCase();
+  const isEduVnEmail =
+    email.length > 0 &&
+    !hasExtraWhitespace &&
+    !normalizedEmailInput.includes('..') &&
+    eduVnRegex.test(normalizedEmailInput);
 
-  const issueVerificationCode = (isResend: boolean) => {
-    const newCode = generateNewOtp();
-    if (activeOtp) {
-      setExpiredOtp(activeOtp);
-    }
-    setActiveOtp(newCode);
-    setSecondsLeft(60);
-    setOtpCode('');
+  // Request private OTP from backend server (sent via SMTP/Email API, never shown publicly)
+  const requestServerOtp = async (targetEmail: string, isResend: boolean) => {
+    setIsSendingOtp(true);
     setErrorMsg(null);
-    if (isResend) {
-      setResendCount((prev) => prev + 1);
-      setResendNotice(`Đã gửi lại mã xác thực mới tới ${trimmedEmail}`);
-    } else {
-      setResendNotice(null);
+    if (!isResend) setResendNotice(null);
+
+    try {
+      const response = await fetch('/api/auth/request-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: targetEmail }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.valid || !data.emailSent) {
+        setErrorMsg(
+          data.error ||
+            'Không thể gửi mã xác minh tới email của bạn. Vui lòng kiểm tra lại địa chỉ .edu.vn hoặc cấu hình máy chủ gửi thư.'
+        );
+        return false;
+      }
+
+      setNormalizedVerifiedEmail(data.email);
+      setSecondsLeft(60);
+      setIsOtpActive(true);
+      setOtpCode('');
+
+      if (isResend) {
+        setResendCount((prev) => prev + 1);
+        setResendNotice(`Đã gửi lại mã xác minh mới tới hộp thư ${data.email}`);
+      } else {
+        setResendNotice(null);
+      }
+
+      return true;
+    } catch {
+      setErrorMsg('Không thể kết nối máy chủ xác thực email. Vui lòng thử lại sau.');
+      return false;
+    } finally {
+      setIsSendingOtp(false);
     }
   };
 
   // 60-second countdown timer when verifying email in Step 2
   useEffect(() => {
-    if (step !== 2 || secondsLeft <= 0) return;
+    if (step !== 2 || !isOtpActive || secondsLeft <= 0) return;
 
     const timer = window.setInterval(() => {
-      setSecondsLeft((prev) => {
-        if (prev <= 1) {
-          return 0;
-        }
-        return prev - 1;
-      });
+      setSecondsLeft((prev) => (prev <= 1 ? 0 : prev - 1));
     }, 1000);
 
     return () => window.clearInterval(timer);
-  }, [step, secondsLeft]);
+  }, [step, isOtpActive, secondsLeft]);
 
-  // Invalidate active OTP immediately when countdown hits 0
+  // Immediately invalidate OTP on both UI and server when 60s countdown hits 0
   useEffect(() => {
-    if (step === 2 && secondsLeft === 0 && activeOtp !== null) {
-      setExpiredOtp(activeOtp);
-      setActiveOtp(null);
+    if (step === 2 && secondsLeft === 0 && isOtpActive) {
+      setIsOtpActive(false);
       setResendNotice(null);
+      if (normalizedVerifiedEmail) {
+        fetch('/api/auth/invalidate-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: normalizedVerifiedEmail }),
+        }).catch(() => {});
+      }
     }
-  }, [step, secondsLeft, activeOtp]);
+  }, [step, secondsLeft, isOtpActive, normalizedVerifiedEmail]);
 
-  const handleStep1Submit = (e: React.FormEvent) => {
+  const handleStep1Submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanedUsername = username.trim();
+
+    if (cleanedUsername.length < 3) {
+      setErrorMsg('Vui lòng nhập Username (tối thiểu 3 ký tự).');
+      return;
+    }
+    if (/\s/.test(cleanedUsername)) {
+      setErrorMsg('Username không được chứa khoảng trắng.');
+      return;
+    }
     if (!universityId) {
       setErrorMsg('Vui lòng chọn trường đại học của bạn.');
       return;
@@ -235,9 +278,13 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
       setErrorMsg('Vui lòng nhập mã số sinh viên (MSSV).');
       return;
     }
-    if (!trimmedEmail || !isEduVnEmail) {
+    if (hasExtraWhitespace) {
+      setErrorMsg('Email không được chứa khoảng trắng thừa.');
+      return;
+    }
+    if (!isEduVnEmail) {
       setErrorMsg(
-        'Email đăng ký tài khoản sinh viên bắt buộc phải có đuôi .edu.vn (ví dụ: mssv@ueh.edu.vn).'
+        'Chỉ chấp nhận email sinh viên hợp lệ kết thúc chính xác bằng ".edu.vn" (ví dụ: mssv@st.ueh.edu.vn).'
       );
       return;
     }
@@ -253,63 +300,82 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
       setErrorMsg('Vui lòng đồng ý với Điều khoản sử dụng và Chính sách bảo mật.');
       return;
     }
-    setErrorMsg(null);
-    setExpiredOtp(null);
+
     setResendCount(0);
-    issueVerificationCode(false);
-    setStep(2);
+    const sentOk = await requestServerOtp(email, false);
+    if (sentOk) {
+      setStep(2);
+    }
   };
 
-  const handleStep2Submit = (e: React.FormEvent) => {
+  const handleStep2Submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanedOtp = otpCode.trim();
 
-    if (secondsLeft <= 0 || !activeOtp) {
+    if (secondsLeft <= 0 || !isOtpActive) {
       setErrorMsg(
-        'Mã xác thực đã hết hạn sau 60 giây và bị vô hiệu. Vui lòng ấn "Gửi lại mã khác" để nhận mã mới.'
+        'Mã xác minh đã hết hiệu lực sau 60 giây và bị vô hiệu. Vui lòng ấn "Gửi lại mã khác" để nhận mã mới.'
       );
       return;
     }
     if (cleanedOtp.length !== 6) {
-      setErrorMsg('Vui lòng nhập đủ 6 chữ số mã xác thực đã gửi về email.');
-      return;
-    }
-    if (expiredOtp && cleanedOtp === expiredOtp) {
-      setErrorMsg(
-        'Mã này đã cũ và bị vô hiệu. Vui lòng nhập mã mới nhất vừa được gửi về email.'
-      );
-      return;
-    }
-    if (cleanedOtp !== activeOtp) {
-      setErrorMsg(
-        'Mã xác thực không chính xác. Tài khoản chỉ được tạo khi nhập đúng mã gửi về email .edu.vn.'
-      );
+      setErrorMsg('Vui lòng nhập đủ 6 chữ số mã xác minh đã gửi về email cá nhân.');
       return;
     }
 
-    // Verified successfully: create & save student account
-    try {
-      const existingRaw = localStorage.getItem('unidoc_registered_accounts');
-      const existingList = existingRaw ? JSON.parse(existingRaw) : [];
-      const newAccount = {
-        universityId,
-        universityName: selectedUniversity?.shortName || 'ĐH Kinh tế TP.HCM',
-        studentId: studentId.trim(),
-        email: trimmedEmail,
-        verifiedAt: new Date().toISOString(),
-      };
-      const filtered = Array.isArray(existingList)
-        ? existingList.filter((acc: { email?: string }) => acc.email !== trimmedEmail)
-        : [];
-      localStorage.setItem(
-        'unidoc_registered_accounts',
-        JSON.stringify([newAccount, ...filtered])
-      );
-    } catch {}
-
+    setIsVerifyingOtp(true);
     setErrorMsg(null);
-    setActiveOtp(null);
-    setStep(3);
+
+    try {
+      const response = await fetch('/api/auth/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: normalizedVerifiedEmail,
+          code: cleanedOtp,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.verified) {
+        setErrorMsg(
+          data.error ||
+            'Mã xác minh không chính xác. Vui lòng kiểm tra lại email .edu.vn của bạn.'
+        );
+        return;
+      }
+
+      // Verified successfully: create & save student account with Username
+      try {
+        const existingRaw = localStorage.getItem('unidoc_registered_accounts');
+        const existingList = existingRaw ? JSON.parse(existingRaw) : [];
+        const newAccount = {
+          username: username.trim(),
+          universityId,
+          universityName: selectedUniversity?.shortName || 'ĐH Kinh tế TP.HCM',
+          studentId: studentId.trim(),
+          email: normalizedVerifiedEmail,
+          verifiedAt: new Date().toISOString(),
+        };
+        const filtered = Array.isArray(existingList)
+          ? existingList.filter(
+              (acc: { email?: string }) => acc.email !== normalizedVerifiedEmail
+            )
+          : [];
+        localStorage.setItem(
+          'unidoc_registered_accounts',
+          JSON.stringify([newAccount, ...filtered])
+        );
+      } catch {}
+
+      setIsOtpActive(false);
+      setStep(3);
+    } catch {
+      setErrorMsg('Không thể xác minh mã lúc này. Vui lòng thử lại.');
+    } finally {
+      setIsVerifyingOtp(false);
+    }
   };
 
   const steps = [
@@ -402,7 +468,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
 
           {/* Inline validation error */}
           {errorMsg && (
-            <div className="px-3.5 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 text-xs font-semibold text-amber-800 dark:text-amber-300">
+            <div className="px-3.5 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 text-xs font-semibold text-amber-800 dark:text-amber-300 leading-relaxed">
               {errorMsg}
             </div>
           )}
@@ -410,7 +476,30 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
           {/* STEP 1: THÔNG TIN */}
           {step === 1 && (
             <form onSubmit={handleStep1Submit} className="space-y-3.5">
-              {/* 1. Trường học */}
+              {/* 1. Username */}
+              <div>
+                <label className="block text-xs font-bold text-[#0860c9] dark:text-zinc-200 mb-1.5">
+                  Username
+                </label>
+                <div className="relative flex items-center">
+                  <User className="w-4 h-4 text-[#4086ee] absolute left-3.5 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={username}
+                    onChange={(e) => {
+                      setUsername(e.target.value);
+                      if (errorMsg) setErrorMsg(null);
+                    }}
+                    placeholder="Nhập username của bạn (VD: minhanh_ueh)"
+                    className="w-full h-12 pl-10 pr-3.5 rounded-xl bg-white dark:bg-zinc-900 border border-[#b9e7ff] dark:border-zinc-700 text-sm text-slate-900 dark:text-white placeholder:text-[#7b93af] dark:placeholder:text-zinc-400 focus:outline-hidden focus:border-[#4086ee] focus:ring-2 focus:ring-[#4086ee]/15 transition-all"
+                  />
+                </div>
+                <p className="mt-1 text-[11px] text-[#5b728f] dark:text-zinc-400">
+                  Tên hiển thị công khai trên trang cá nhân của bạn.
+                </p>
+              </div>
+
+              {/* 2. Trường học */}
               <div>
                 <label className="block text-xs font-bold text-[#0860c9] dark:text-zinc-200 mb-1.5">
                   Trường học
@@ -419,7 +508,10 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
                   <Building2 className="w-4 h-4 text-[#4086ee] absolute left-3.5 pointer-events-none" />
                   <select
                     value={universityId}
-                    onChange={(e) => setUniversityId(e.target.value)}
+                    onChange={(e) => {
+                      setUniversityId(e.target.value);
+                      if (errorMsg) setErrorMsg(null);
+                    }}
                     className={`w-full h-12 pl-10 pr-9 rounded-xl bg-white dark:bg-zinc-900 border border-[#b9e7ff] dark:border-zinc-700 text-sm appearance-none focus:outline-hidden focus:border-[#4086ee] focus:ring-2 focus:ring-[#4086ee]/15 transition-all cursor-pointer ${
                       universityId
                         ? 'text-slate-900 dark:text-white font-medium'
@@ -437,7 +529,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
                 </div>
               </div>
 
-              {/* 2. Mã số sinh viên */}
+              {/* 3. Mã số sinh viên */}
               <div>
                 <label className="block text-xs font-bold text-[#0860c9] dark:text-zinc-200 mb-1.5">
                   Mã số sinh viên
@@ -447,20 +539,23 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
                   <input
                     type="text"
                     value={studentId}
-                    onChange={(e) => setStudentId(e.target.value)}
+                    onChange={(e) => {
+                      setStudentId(e.target.value);
+                      if (errorMsg) setErrorMsg(null);
+                    }}
                     placeholder="Nhập MSSV"
                     className="w-full h-12 pl-10 pr-3.5 rounded-xl bg-white dark:bg-zinc-900 border border-[#b9e7ff] dark:border-zinc-700 text-sm text-slate-900 dark:text-white placeholder:text-[#7b93af] dark:placeholder:text-zinc-400 focus:outline-hidden focus:border-[#4086ee] focus:ring-2 focus:ring-[#4086ee]/15 transition-all"
                   />
                 </div>
               </div>
 
-              {/* 3. Email sinh viên (.edu.vn) */}
+              {/* 4. Email sinh viên (.edu.vn) */}
               <div>
                 <div className="flex items-center justify-between gap-2 mb-1.5">
                   <label className="block text-xs font-bold text-[#0860c9] dark:text-zinc-200">
                     Email sinh viên <span className="text-[#4086ee]">(.edu.vn)</span>
                   </label>
-                  {email.trim().length > 0 && (
+                  {email.length > 0 && (
                     <span
                       className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md ${
                         isEduVnEmail
@@ -472,6 +567,8 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
                         <>
                           <CheckCircle2 className="w-3 h-3" /> Hợp lệ .edu.vn
                         </>
+                      ) : hasExtraWhitespace ? (
+                        'Không chứa khoảng trắng'
                       ) : (
                         'Cần đuôi .edu.vn'
                       )}
@@ -483,29 +580,29 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
                   <input
                     type="email"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      if (errorMsg) setErrorMsg(null);
+                    }}
                     placeholder={
                       selectedUniversity?.studentEmailDomain
                         ? `mssv@${selectedUniversity.studentEmailDomain}`
                         : 'example@edu.vn'
                     }
                     className={`w-full h-12 pl-10 pr-3.5 rounded-xl bg-white dark:bg-zinc-900 border text-sm text-slate-900 dark:text-white placeholder:text-[#7b93af] dark:placeholder:text-zinc-400 focus:outline-hidden focus:ring-2 transition-all ${
-                      email.trim().length > 0 && !isEduVnEmail
+                      email.length > 0 && !isEduVnEmail
                         ? 'border-amber-400 focus:border-amber-500 focus:ring-amber-400/15'
                         : 'border-[#b9e7ff] dark:border-zinc-700 focus:border-[#4086ee] focus:ring-[#4086ee]/15'
                     }`}
                   />
                 </div>
                 <p className="mt-1.5 text-[11px] text-[#5b728f] dark:text-zinc-400">
-                  Bắt buộc dùng email sinh viên có đuôi <b className="text-[#0860c9] dark:text-sky-300">.edu.vn</b>
-                  {selectedUniversity?.studentEmailDomain
-                    ? ` (VD trường ${selectedUniversity.shortName}: @${selectedUniversity.studentEmailDomain})`
-                    : ' (VD: ten@sv.ueh.edu.vn)'}
-                  .
+                  Mã xác minh riêng tư sẽ được gửi trực tiếp về email đuôi{' '}
+                  <b className="text-[#0860c9] dark:text-sky-300">.edu.vn</b> của bạn (không khoảng trắng thừa).
                 </p>
               </div>
 
-              {/* 4. Mật khẩu */}
+              {/* 5. Mật khẩu */}
               <div>
                 <label className="block text-xs font-bold text-[#0860c9] dark:text-zinc-200 mb-1.5">
                   Mật khẩu
@@ -515,7 +612,10 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
                   <input
                     type={showPassword ? 'text' : 'password'}
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      if (errorMsg) setErrorMsg(null);
+                    }}
                     placeholder="Tạo mật khẩu"
                     className="w-full h-12 pl-10 pr-11 rounded-xl bg-white dark:bg-zinc-900 border border-[#b9e7ff] dark:border-zinc-700 text-sm text-slate-900 dark:text-white placeholder:text-[#7b93af] dark:placeholder:text-zinc-400 focus:outline-hidden focus:border-[#4086ee] focus:ring-2 focus:ring-[#4086ee]/15 transition-all"
                   />
@@ -534,7 +634,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
                 </div>
               </div>
 
-              {/* 5. Nhập lại mật khẩu */}
+              {/* 6. Nhập lại mật khẩu */}
               <div>
                 <label className="block text-xs font-bold text-[#0860c9] dark:text-zinc-200 mb-1.5">
                   Nhập lại mật khẩu
@@ -544,7 +644,10 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
                   <input
                     type={showConfirmPassword ? 'text' : 'password'}
                     value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    onChange={(e) => {
+                      setConfirmPassword(e.target.value);
+                      if (errorMsg) setErrorMsg(null);
+                    }}
                     placeholder="Nhập lại mật khẩu"
                     className="w-full h-12 pl-10 pr-11 rounded-xl bg-white dark:bg-zinc-900 border border-[#b9e7ff] dark:border-zinc-700 text-sm text-slate-900 dark:text-white placeholder:text-[#7b93af] dark:placeholder:text-zinc-400 focus:outline-hidden focus:border-[#4086ee] focus:ring-2 focus:ring-[#4086ee]/15 transition-all"
                   />
@@ -581,14 +684,22 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
               {/* Primary CTA "Tiếp theo" */}
               <button
                 type="submit"
-                className="w-full py-3.5 rounded-2xl bg-[#4086ee] hover:bg-[#0860c9] text-white font-bold text-sm sm:text-base shadow-md shadow-[#4086ee]/25 active:scale-[0.99] transition-all cursor-pointer"
+                disabled={isSendingOtp}
+                className="w-full py-3.5 rounded-2xl bg-[#4086ee] hover:bg-[#0860c9] disabled:opacity-70 text-white font-bold text-sm sm:text-base shadow-md shadow-[#4086ee]/25 active:scale-[0.99] transition-all cursor-pointer inline-flex items-center justify-center gap-2"
               >
-                Tiếp theo
+                {isSendingOtp ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Đang gửi mã xác minh...</span>
+                  </>
+                ) : (
+                  <span>Tiếp theo</span>
+                )}
               </button>
             </form>
           )}
 
-          {/* STEP 2: XÁC MINH EMAIL (60s COUNTDOWN + INVALIDATION + RESEND) */}
+          {/* STEP 2: XÁC MINH EMAIL RIÊNG TƯ (KHÔNG HIỂN THỊ CÔNG KHAI MÃ OTP) */}
           {step === 2 && (
             <form onSubmit={handleStep2Submit} className="space-y-4">
               {/* Header info + 60s countdown */}
@@ -596,13 +707,16 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
                 <div className="w-10 h-10 rounded-full bg-white dark:bg-zinc-950 border border-[#b9e7ff] dark:border-zinc-700 text-[#4086ee] flex items-center justify-center mx-auto">
                   <Mail className="w-5 h-5" />
                 </div>
-                <div className="space-y-0.5">
+                <div className="space-y-1">
                   <div className="text-sm font-bold text-[#0860c9] dark:text-white">
-                    Xác thực email sinh viên (.edu.vn)
+                    Kiểm tra hộp thư email cá nhân
                   </div>
                   <p className="text-xs text-[#5b728f] dark:text-zinc-400 leading-relaxed">
-                    Mã xác thực 6 chữ số đã được gửi tới{' '}
-                    <b className="text-[#0860c9] dark:text-sky-300 break-all">{trimmedEmail}</b>
+                    Mã xác minh riêng tư gồm 6 chữ số đã được gửi trực tiếp về địa chỉ{' '}
+                    <b className="text-[#0860c9] dark:text-sky-300 break-all">
+                      {normalizedVerifiedEmail}
+                    </b>
+                    . Để bảo mật, mã không hiển thị công khai tại đây.
                   </p>
                 </div>
 
@@ -611,14 +725,14 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
                   <div className="flex items-center justify-center gap-1.5 text-xs font-extrabold">
                     <Clock
                       className={`w-3.5 h-3.5 ${
-                        secondsLeft === 0
+                        secondsLeft === 0 || !isOtpActive
                           ? 'text-rose-600 dark:text-rose-400'
                           : secondsLeft <= 15
                           ? 'text-amber-600 dark:text-amber-400'
                           : 'text-[#4086ee]'
                       }`}
                     />
-                    {secondsLeft > 0 && activeOtp ? (
+                    {secondsLeft > 0 && isOtpActive ? (
                       <span
                         className={`tabular-nums ${
                           secondsLeft <= 15
@@ -630,7 +744,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
                       </span>
                     ) : (
                       <span className="text-rose-600 dark:text-rose-400">
-                        Hết 60s — Mã xác thực đã bị vô hiệu
+                        Hết 60s — Mã xác minh đã bị vô hiệu
                       </span>
                     )}
                   </div>
@@ -638,7 +752,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
                   <div className="w-full h-1.5 rounded-full bg-white dark:bg-zinc-800 overflow-hidden border border-[#b9e7ff]/60 dark:border-zinc-700">
                     <div
                       className={`h-full transition-all duration-1000 ease-linear ${
-                        secondsLeft === 0
+                        secondsLeft === 0 || !isOtpActive
                           ? 'bg-rose-500'
                           : secondsLeft <= 15
                           ? 'bg-amber-500'
@@ -648,47 +762,6 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
                     />
                   </div>
                 </div>
-              </div>
-
-              {/* Simulated Student Email Inbox Notification (so the verification code can be checked directly) */}
-              <div
-                className={`p-3 rounded-xl border text-xs transition-colors ${
-                  secondsLeft > 0 && activeOtp
-                    ? 'bg-white dark:bg-zinc-900 border-[#b9e7ff] dark:border-zinc-700'
-                    : 'bg-rose-50/70 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900/70'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2 mb-1">
-                  <span className="font-bold text-[#0860c9] dark:text-sky-300">
-                    Hộp thư đến: {trimmedEmail}
-                  </span>
-                  <span
-                    className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                      secondsLeft > 0 && activeOtp
-                        ? 'bg-[#edf8fe] dark:bg-sky-950 text-[#4086ee]'
-                        : 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300'
-                    }`}
-                  >
-                    {secondsLeft > 0 && activeOtp ? `Hiệu lực ${secondsLeft}s` : 'Đã vô hiệu'}
-                  </span>
-                </div>
-                {secondsLeft > 0 && activeOtp ? (
-                  <p className="text-[#5b728f] dark:text-zinc-300">
-                    Mã xác thực tạo tài khoản UniDoc của bạn là:{' '}
-                    <b className="text-sm font-black tracking-widest text-[#0860c9] dark:text-white select-all">
-                      {activeOtp}
-                    </b>
-                  </p>
-                ) : (
-                  <p className="text-rose-700 dark:text-rose-300 flex items-center gap-1.5 font-medium">
-                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                    <span>
-                      Mã cũ{' '}
-                      {expiredOtp && <s className="font-bold tracking-wider">{expiredOtp}</s>} đã
-                      hết hạn và không thể dùng nữa. Vui lòng ấn &ldquo;Gửi lại mã khác&rdquo;.
-                    </span>
-                  </p>
-                )}
               </div>
 
               {/* Resend notification */}
@@ -702,20 +775,20 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
               {/* OTP input */}
               <div>
                 <label className="block text-xs font-bold text-[#0860c9] dark:text-zinc-200 mb-1.5">
-                  Nhập mã xác thực 6 chữ số
+                  Nhập mã xác minh 6 chữ số từ email
                 </label>
                 <input
                   type="text"
                   inputMode="numeric"
                   maxLength={6}
-                  disabled={secondsLeft <= 0 || !activeOtp}
+                  disabled={secondsLeft <= 0 || !isOtpActive}
                   value={otpCode}
                   onChange={(e) => {
                     setOtpCode(e.target.value.replace(/\D/g, ''));
                     if (errorMsg) setErrorMsg(null);
                   }}
                   placeholder={
-                    secondsLeft > 0 && activeOtp
+                    secondsLeft > 0 && isOtpActive
                       ? 'Nhập mã 6 chữ số'
                       : 'Mã đã hết hạn — Hãy gửi lại mã khác'
                   }
@@ -730,7 +803,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
                   onClick={() => {
                     setErrorMsg(null);
                     setResendNotice(null);
-                    setActiveOtp(null);
+                    setIsOtpActive(false);
                     setStep(1);
                   }}
                   className="font-bold text-[#5b728f] hover:text-[#0860c9] dark:text-zinc-400 cursor-pointer"
@@ -739,16 +812,17 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => issueVerificationCode(true)}
-                  className={`inline-flex items-center gap-1.5 font-bold cursor-pointer transition-colors ${
-                    secondsLeft <= 0
+                  disabled={isSendingOtp}
+                  onClick={() => requestServerOtp(email, true)}
+                  className={`inline-flex items-center gap-1.5 font-bold cursor-pointer transition-colors disabled:opacity-60 ${
+                    secondsLeft <= 0 || !isOtpActive
                       ? 'px-3 py-1.5 rounded-xl bg-[#edf8fe] dark:bg-sky-950 text-[#0860c9] dark:text-sky-300 border border-[#b9e7ff] dark:border-sky-800 hover:bg-[#dceeff]'
                       : 'text-[#4086ee] hover:text-[#0860c9] hover:underline'
                   }`}
                 >
-                  <RefreshCw className="w-3.5 h-3.5" />
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSendingOtp ? 'animate-spin' : ''}`} />
                   <span>
-                    {secondsLeft <= 0
+                    {secondsLeft <= 0 || !isOtpActive
                       ? 'Gửi lại mã khác'
                       : resendCount > 0
                       ? 'Không nhận được? Gửi lại mã khác'
@@ -759,12 +833,19 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
 
               <button
                 type="submit"
-                disabled={secondsLeft <= 0 || !activeOtp}
-                className="w-full py-3.5 rounded-2xl bg-[#4086ee] hover:bg-[#0860c9] disabled:bg-slate-300 dark:disabled:bg-zinc-800 disabled:text-slate-500 dark:disabled:text-zinc-500 disabled:shadow-none disabled:cursor-not-allowed text-white font-bold text-sm shadow-md shadow-[#4086ee]/25 active:scale-[0.99] transition-all cursor-pointer"
+                disabled={secondsLeft <= 0 || !isOtpActive || isVerifyingOtp}
+                className="w-full py-3.5 rounded-2xl bg-[#4086ee] hover:bg-[#0860c9] disabled:bg-slate-300 dark:disabled:bg-zinc-800 disabled:text-slate-500 dark:disabled:text-zinc-500 disabled:shadow-none disabled:cursor-not-allowed text-white font-bold text-sm shadow-md shadow-[#4086ee]/25 active:scale-[0.99] transition-all cursor-pointer inline-flex items-center justify-center gap-2"
               >
-                {secondsLeft > 0 && activeOtp
-                  ? 'Xác nhận & Tạo tài khoản'
-                  : 'Mã đã hết hạn — Vui lòng gửi lại mã khác'}
+                {isVerifyingOtp ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Đang xác minh...</span>
+                  </>
+                ) : secondsLeft > 0 && isOtpActive ? (
+                  <span>Xác nhận & Tạo tài khoản</span>
+                ) : (
+                  <span>Mã đã hết hạn — Vui lòng gửi lại mã khác</span>
+                )}
               </button>
             </form>
           )}
@@ -782,8 +863,10 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
                   <span>Tạo tài khoản thành công!</span>
                 </h2>
                 <p className="text-xs sm:text-sm text-[#5b728f] dark:text-zinc-400 leading-relaxed">
-                  Email <b className="text-[#0860c9] dark:text-sky-300">{trimmedEmail}</b> của sinh viên MSSV{' '}
-                  <b className="text-[#0860c9] dark:text-white">{studentId}</b> ({selectedUniversity?.shortName}) đã được xác thực và kích hoạt tài khoản UniDoc.
+                  Chào mừng <b className="text-[#0860c9] dark:text-white">{username.trim()}</b> (MSSV{' '}
+                  <b className="text-[#0860c9] dark:text-white">{studentId}</b> •{' '}
+                  {selectedUniversity?.shortName}). Email{' '}
+                  <b className="text-[#0860c9] dark:text-sky-300">{normalizedVerifiedEmail}</b> đã được xác thực.
                 </p>
               </div>
 
@@ -791,9 +874,10 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
                 type="button"
                 onClick={() =>
                   onCompleteRegister({
+                    username: username.trim(),
                     universityName: selectedUniversity?.shortName || 'ĐH Kinh tế TP.HCM',
                     studentId: studentId.trim(),
-                    email: trimmedEmail,
+                    email: normalizedVerifiedEmail,
                   })
                 }
                 className="w-full py-3.5 rounded-2xl bg-[#4086ee] hover:bg-[#0860c9] text-white font-bold text-sm shadow-md shadow-[#4086ee]/25 active:scale-[0.99] transition-all cursor-pointer"

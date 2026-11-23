@@ -1,21 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Book, ConditionType, University } from '../types';
 import {
   X,
-  Plus,
   Camera,
   Video,
   Upload,
   Check,
-  Building,
-  Sparkles,
   Award,
   ArrowRight,
   ArrowLeft,
   MapPin,
   Trash2,
+  AlertCircle,
 } from 'lucide-react';
 import { HUMOROUS_SELLER_BADGES } from '../data/mockData';
+import { processImageFiles } from '../utils/imageUpload';
 
 interface PostBookModalProps {
   isOpen: boolean;
@@ -33,33 +32,32 @@ export const PostBookModal: React.FC<PostBookModalProps> = ({
   currentSellerSalesCount = 5,
 }) => {
   const [step, setStep] = useState(1);
+  const [stepError, setStepError] = useState<string | null>(null);
 
   // Form states
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
-  const [isbn, setIsbn] = useState('');
   const [publisher, setPublisher] = useState('');
   const [category, setCategory] = useState('Toán & Khoa học cơ bản');
-  const [universityId, setUniversityId] = useState('dhqg_hcm');
+  const [universityId, setUniversityId] = useState('');
   const [uniSearchFilter, setUniSearchFilter] = useState('');
   const [major, setMajor] = useState('Khoa học Máy tính');
-  const [subjectCode, setSubjectCode] = useState('');
   const [subjectName, setSubjectName] = useState('');
   const [condition, setCondition] = useState<ConditionType>('good');
-  const [hasHighlight, setHasHighlight] = useState(true);
-  const [hasPencilNotes, setHasPencilNotes] = useState(false);
+  const [hasHighlight] = useState(true);
+  const [hasPencilNotes] = useState(false);
   const [description, setDescription] = useState('');
   const [price, setPrice] = useState<number>(30000);
   const [originalPrice, setOriginalPrice] = useState<number>(85000);
-  const [pickupLocations, setPickupLocations] = useState<string[]>([
-    'Thư viện trung tâm',
-    'KTX Khu B',
-  ]);
+  const [pickupLocations, setPickupLocations] = useState<string[]>([]);
+  const [hasCustomizedLocations, setHasCustomizedLocations] = useState(false);
+  const [locationType, setLocationType] = useState<'ktx' | 'campus' | 'other'>('ktx');
   const [newLocationInput, setNewLocationInput] = useState('');
-  const [images, setImages] = useState<string[]>([
-    'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=800&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1532012164546-f432f2e3777f?w=800&auto=format&fit=crop&q=80',
-  ]);
+  const [images, setImages] = useState<string[]>([]);
+  const [imageUploadError, setImageUploadError] = useState<string | null>(null);
+  const [isUploadingImages, setIsUploadingImages] = useState(false);
+  const [isDraggingImages, setIsDraggingImages] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [videoUrl, setVideoUrl] = useState<string>(
     'https://assets.mixkit.co/videos/preview/mixkit-turning-the-pages-of-a-book-41584-large.mp4'
   );
@@ -67,34 +65,146 @@ export const PostBookModal: React.FC<PostBookModalProps> = ({
 
   if (!isOpen) return null;
 
-  const currentUni = universities.find((u) => u.id === universityId) || universities[0];
+  const selectedUni = universities.find((u) => u.id === universityId);
+  const filteredUniversities = universities.filter((u) => {
+    if (!uniSearchFilter.trim()) return true;
+    const q = uniSearchFilter.toLowerCase();
+    return (
+      u.name.toLowerCase().includes(q) ||
+      u.shortName.toLowerCase().includes(q) ||
+      u.code.toLowerCase().includes(q) ||
+      u.city.toLowerCase().includes(q)
+    );
+  });
 
-  const handleAddSampleImage = () => {
-    const samples = [
-      'https://images.unsplash.com/photo-1512820790803-83ca734da794?w=800&auto=format&fit=crop&q=80',
-      'https://images.unsplash.com/photo-1497633762265-9d179a990aa6?w=800&auto=format&fit=crop&q=80',
-      'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?w=800&auto=format&fit=crop&q=80',
-    ];
-    setImages([...images, samples[images.length % samples.length]]);
+  const suggestedLocations = Array.from(
+    new Set([
+      ...(selectedUni?.campuses || []),
+      'KTX Khu A',
+      'KTX Khu B',
+      'Cơ sở chính',
+      'Cơ sở 2',
+      'Thư viện trung tâm',
+    ])
+  );
+
+  const handleProcessSelectedFiles = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    setIsUploadingImages(true);
+    setImageUploadError(null);
+    const { dataUrls, error } = await processImageFiles(fileList, {
+      maxCount: 6,
+      currentCount: images.length,
+      maxDimension: 1200,
+      maxFileSizeMB: 10,
+    });
+    if (dataUrls.length > 0) {
+      setImages((prev) => [...prev, ...dataUrls].slice(0, 6));
+      setStepError(null);
+    }
+    if (error) {
+      setImageUploadError(error);
+    }
+    setIsUploadingImages(false);
   };
 
-  const handleAddLocation = () => {
-    if (newLocationInput.trim() && !pickupLocations.includes(newLocationInput.trim())) {
-      setPickupLocations([...pickupLocations, newLocationInput.trim()]);
-      setNewLocationInput('');
+  const handleImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    await handleProcessSelectedFiles(files);
+    e.target.value = '';
+  };
+
+  const handleImageDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingImages(false);
+    await handleProcessSelectedFiles(e.dataTransfer.files);
+  };
+
+  const handleSelectUniversity = (nextUniId: string) => {
+    setUniversityId(nextUniId);
+    setStepError(null);
+    const uni = universities.find((u) => u.id === nextUniId);
+    if (uni && !hasCustomizedLocations) {
+      setPickupLocations(uni.campuses.slice(0, 2));
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim()) return;
+  const handleToggleSuggestedLocation = (loc: string) => {
+    setHasCustomizedLocations(true);
+    setPickupLocations((prev) =>
+      prev.includes(loc) ? prev.filter((item) => item !== loc) : [...prev, loc]
+    );
+  };
+
+  const handleAddLocation = () => {
+    const raw = newLocationInput.trim();
+    if (!raw) return;
+
+    let formatted = raw;
+    if (locationType === 'ktx' && !raw.toLowerCase().includes('ktx') && !raw.toLowerCase().includes('ký túc xá')) {
+      formatted = `KTX: ${raw}`;
+    } else if (locationType === 'campus' && !raw.toLowerCase().includes('cơ sở')) {
+      formatted = `Cơ sở: ${raw}`;
+    }
+
+    if (!pickupLocations.includes(formatted)) {
+      setHasCustomizedLocations(true);
+      setPickupLocations([...pickupLocations, formatted]);
+    }
+    setNewLocationInput('');
+  };
+
+  const validateStep = (targetStep: number): string | null => {
+    if (targetStep === 1) {
+      if (!title.trim()) {
+        return 'Vui lòng nhập Tên sách giáo trình / Tài liệu.';
+      }
+    }
+    if (targetStep === 2) {
+      if (!universityId || !selectedUni) {
+        return 'Vui lòng chọn Trường đại học áp dụng sách.';
+      }
+      if (!subjectName.trim()) {
+        return 'Vui lòng nhập Tên môn học.';
+      }
+    }
+    if (targetStep === 3) {
+      if (images.length === 0) {
+        return 'Vui lòng tải lên ít nhất 1 hình ảnh thực tế của sách.';
+      }
+    }
+    return null;
+  };
+
+  const handleNextStep = () => {
+    const error = validateStep(step);
+    if (error) {
+      setStepError(error);
+      return;
+    }
+    setStepError(null);
+    setStep((prev) => Math.min(4, prev + 1));
+  };
+
+  const handleSubmit = (e?: React.SyntheticEvent) => {
+    e?.preventDefault();
+
+    for (const s of [1, 2, 3]) {
+      const err = validateStep(s);
+      if (err) {
+        setStep(s);
+        setStepError(err);
+        return;
+      }
+    }
+
+    if (!selectedUni) return;
 
     const newBook: Book = {
       id: `book_${Date.now()}`,
-      title,
-      author: author || 'Nhiều tác giả',
-      isbn: isbn || undefined,
-      publisher: publisher || 'NXB Giáo Dục',
+      title: title.trim(),
+      author: author.trim() || 'Nhiều tác giả',
+      publisher: publisher.trim() || 'NXB Giáo Dục',
       publishYear: 2023,
       price: Number(price),
       originalPrice: Number(originalPrice) || undefined,
@@ -105,21 +215,20 @@ export const PostBookModal: React.FC<PostBookModalProps> = ({
         hasCoverDamage: false,
         pagesMissing: false,
       },
-      description: description || 'Sách giáo trình còn mới, thích hợp cho sinh viên chuẩn bị học phần.',
+      description: description.trim() || 'Sách giáo trình còn mới, thích hợp cho sinh viên chuẩn bị học phần.',
       category,
       universityId,
-      universityName: currentUni.name,
-      major,
-      subjectCode: subjectCode || 'MH101',
-      subjectName: subjectName || title,
-      images: images.length > 0 ? images : ['https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=800&auto=format&fit=crop&q=80'],
+      universityName: selectedUni.name,
+      major: major.trim() || 'Đại cương',
+      subjectName: subjectName.trim(),
+      images: images,
       videoUrl: includeVideo ? videoUrl : undefined,
       seller: {
         id: 'user_current',
         name: 'Trần Văn Nam',
         avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=160&auto=format&fit=crop&q=80',
-        university: currentUni.name,
-        major: major,
+        university: selectedUni.name,
+        major: major.trim() || 'Đại cương',
         isVerifiedStudent: true,
         studentIdMasked: '2214***',
         sellerBadge: HUMOROUS_SELLER_BADGES[1], // Chiến Thần Pass Sách K70
@@ -144,7 +253,12 @@ export const PostBookModal: React.FC<PostBookModalProps> = ({
         responseRate: '100%',
         responseTime: 'Trong 5 phút',
       },
-      pickupLocations: pickupLocations.length > 0 ? pickupLocations : ['Cổng trường chính'],
+      pickupLocations:
+        pickupLocations.length > 0
+          ? pickupLocations
+          : selectedUni.campuses.slice(0, 1).length > 0
+          ? selectedUni.campuses.slice(0, 1)
+          : ['Cổng trường chính'],
       allowShipping: true,
       stock: 1,
       status: 'active',
@@ -154,6 +268,20 @@ export const PostBookModal: React.FC<PostBookModalProps> = ({
     };
 
     onAddBook(newBook);
+    setStep(1);
+    setStepError(null);
+    setTitle('');
+    setAuthor('');
+    setPublisher('');
+    setUniversityId('');
+    setUniSearchFilter('');
+    setSubjectName('');
+    setDescription('');
+    setPickupLocations([]);
+    setHasCustomizedLocations(false);
+    setNewLocationInput('');
+    setImages([]);
+    setImageUploadError(null);
     onClose();
   };
 
@@ -212,38 +340,26 @@ export const PostBookModal: React.FC<PostBookModalProps> = ({
                   type="text"
                   placeholder="Ví dụ: Giáo Trình Giải Tích 1, Nguyên Lý Kế Toán..."
                   value={title}
-                  onChange={(e) => setTitle(e.target.value)}
+                  onChange={(e) => {
+                    setTitle(e.target.value);
+                    if (stepError) setStepError(null);
+                  }}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 text-sm focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 focus:outline-hidden"
                   required
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 uppercase tracking-wider mb-1.5">
-                    Tác giả / Giảng viên chủ biên
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Ví dụ: PGS. TS. Nguyễn Đình Huy"
-                    value={author}
-                    onChange={(e) => setAuthor(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 text-sm focus:border-sky-500 focus:outline-hidden"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 uppercase tracking-wider mb-1.5">
-                    Mã ISBN (Tùy chọn)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="978-604-..."
-                    value={isbn}
-                    onChange={(e) => setIsbn(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 text-sm focus:border-sky-500 focus:outline-hidden font-mono"
-                  />
-                </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 uppercase tracking-wider mb-1.5">
+                  Tác giả / Giảng viên chủ biên
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ví dụ: PGS. TS. Nguyễn Đình Huy"
+                  value={author}
+                  onChange={(e) => setAuthor(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 text-sm focus:border-sky-500 focus:outline-hidden"
+                />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -285,7 +401,8 @@ export const PostBookModal: React.FC<PostBookModalProps> = ({
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 uppercase tracking-wider mb-1.5">
-                  Trường đại học áp dụng sách ({universities.length} trường toàn quốc)
+                  Trường đại học áp dụng sách ({universities.length} trường toàn quốc){' '}
+                  <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -296,25 +413,16 @@ export const PostBookModal: React.FC<PostBookModalProps> = ({
                 />
                 <select
                   value={universityId}
-                  onChange={(e) => setUniversityId(e.target.value)}
+                  onChange={(e) => handleSelectUniversity(e.target.value)}
+                  required
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-700 text-sm focus:border-sky-500 focus:outline-hidden bg-white dark:bg-zinc-900 text-slate-900 dark:text-white font-medium"
                 >
-                  {universities
-                    .filter((u) => {
-                      if (!uniSearchFilter.trim()) return true;
-                      const q = uniSearchFilter.toLowerCase();
-                      return (
-                        u.name.toLowerCase().includes(q) ||
-                        u.shortName.toLowerCase().includes(q) ||
-                        u.code.toLowerCase().includes(q) ||
-                        u.city.toLowerCase().includes(q)
-                      );
-                    })
-                    .map((uni) => (
-                      <option key={uni.id} value={uni.id}>
-                        {uni.shortName} — {uni.name} ({uni.city})
-                      </option>
-                    ))}
+                  <option value="">-- Chọn trường đại học của bạn --</option>
+                  {filteredUniversities.map((uni) => (
+                    <option key={uni.id} value={uni.id}>
+                      {uni.shortName} — {uni.name} ({uni.city})
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -331,32 +439,21 @@ export const PostBookModal: React.FC<PostBookModalProps> = ({
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 uppercase tracking-wider mb-1.5">
-                    Mã học phần / Mã môn
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Ví dụ: MT1003, IT1110, ACC501..."
-                    value={subjectCode}
-                    onChange={(e) => setSubjectCode(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 text-sm focus:border-sky-500 focus:outline-hidden font-mono uppercase"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 uppercase tracking-wider mb-1.5">
-                    Tên môn học
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Ví dụ: Giải tích 1, Cấu trúc dữ liệu..."
-                    value={subjectName}
-                    onChange={(e) => setSubjectName(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 text-sm focus:border-sky-500 focus:outline-hidden"
-                  />
-                </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 uppercase tracking-wider mb-1.5">
+                  Tên môn học <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ví dụ: Giải tích 1, Cấu trúc dữ liệu, Nguyên lý kế toán..."
+                  value={subjectName}
+                  onChange={(e) => {
+                    setSubjectName(e.target.value);
+                    if (stepError) setStepError(null);
+                  }}
+                  required
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 text-sm focus:border-sky-500 focus:outline-hidden"
+                />
               </div>
             </div>
           )}
@@ -364,35 +461,101 @@ export const PostBookModal: React.FC<PostBookModalProps> = ({
           {step === 3 && (
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 uppercase tracking-wider mb-1.5">
-                  Hình ảnh thực tế cuốn sách (Bìa trước, gáy, trang trong)
-                </label>
-                <div className="flex flex-wrap gap-2.5">
-                  {images.map((img, i) => (
-                    <div
-                      key={i}
-                      className="relative w-20 h-20 rounded-xl overflow-hidden border border-slate-200 dark:border-zinc-700 shadow-xs group"
-                    >
-                      <img src={img} alt="preview" className="w-full h-full object-cover" />
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 uppercase tracking-wider">
+                    Hình ảnh thực tế cuốn sách (Bìa trước, gáy, trang trong){' '}
+                    <span className="text-rose-500">*</span>
+                  </label>
+                  <span className="text-[11px] font-semibold text-sky-700 dark:text-sky-400">
+                    {images.length}/6 ảnh (bắt buộc tối thiểu 1 ảnh)
+                  </span>
+                </div>
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleImageFileChange}
+                  className="hidden"
+                />
+
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDraggingImages(true);
+                  }}
+                  onDragLeave={() => setIsDraggingImages(false)}
+                  onDrop={handleImageDrop}
+                  className={`p-3.5 rounded-2xl border-2 border-dashed transition-colors ${
+                    isDraggingImages
+                      ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
+                      : 'border-slate-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-900/60'
+                  }`}
+                >
+                  <div className="flex flex-wrap gap-2.5">
+                    {images.map((img, i) => (
+                      <div
+                        key={i}
+                        className="relative w-22 h-22 rounded-xl overflow-hidden border border-slate-200 dark:border-zinc-700 shadow-xs group bg-white dark:bg-zinc-900"
+                      >
+                        <img
+                          src={img}
+                          alt={`Ảnh sách ${i + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                        {i === 0 && (
+                          <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-sky-600/90 text-white text-[9px] font-bold">
+                            Ảnh bìa
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setImages(images.filter((_, idx) => idx !== i));
+                            setImageUploadError(null);
+                          }}
+                          aria-label={`Xóa ảnh ${i + 1}`}
+                          className="absolute top-1 right-1 p-1 rounded-full bg-slate-900/80 hover:bg-rose-600 text-white opacity-95 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity cursor-pointer"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+
+                    {images.length < 6 && (
                       <button
                         type="button"
-                        onClick={() => setImages(images.filter((_, idx) => idx !== i))}
-                        className="absolute top-1 right-1 p-1 rounded-full bg-slate-900/80 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                        disabled={isUploadingImages}
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-22 h-22 rounded-xl border-2 border-dashed border-sky-400 hover:border-sky-600 bg-sky-50 dark:bg-zinc-900 hover:bg-sky-100 dark:hover:bg-zinc-800 text-sky-700 dark:text-sky-400 flex flex-col items-center justify-center gap-1 px-1 text-center text-[11px] font-bold cursor-pointer transition-colors disabled:opacity-60"
                       >
-                        <Trash2 className="w-3 h-3" />
+                        {isUploadingImages ? (
+                          <span>Đang tải...</span>
+                        ) : (
+                          <>
+                            <Upload className="w-5 h-5" />
+                            <span className="leading-tight">Tải ảnh từ máy</span>
+                          </>
+                        )}
                       </button>
-                    </div>
-                  ))}
+                    )}
+                  </div>
 
-                  <button
-                    type="button"
-                    onClick={handleAddSampleImage}
-                    className="w-20 h-20 rounded-xl border-2 border-dashed border-sky-400 hover:border-sky-600 bg-sky-50 dark:bg-zinc-900 hover:bg-sky-100 dark:hover:bg-zinc-800 text-sky-700 dark:text-sky-400 flex flex-col items-center justify-center gap-1 text-[11px] font-bold cursor-pointer transition-colors"
-                  >
-                    <Camera className="w-5 h-5" />
-                    <span>+ Thêm ảnh</span>
-                  </button>
+                  <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-zinc-400">
+                    <span className="flex items-center gap-1.5">
+                      <Camera className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                      Chọn nhiều ảnh JPG, PNG, WEBP từ điện thoại hoặc máy tính (tối đa 10MB/ảnh).
+                    </span>
+                  </div>
                 </div>
+
+                {imageUploadError && (
+                  <div className="mt-2 flex items-center gap-1.5 text-xs font-medium text-rose-600 dark:text-rose-400">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{imageUploadError}</span>
+                  </div>
+                )}
               </div>
 
               {/* Video Preview Capability */}
@@ -494,44 +657,106 @@ export const PostBookModal: React.FC<PostBookModalProps> = ({
                 </div>
               </div>
 
-              {/* Campus Meetup Spots */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 uppercase tracking-wider mb-1.5">
-                  Điểm hẹn gặp giao sách trực tiếp (Miễn ship)
-                </label>
-                <div className="flex flex-wrap gap-1.5 mb-2">
-                  {pickupLocations.map((loc, i) => (
-                    <span
-                      key={i}
-                      className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-sky-50 dark:bg-sky-950/60 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-800"
-                    >
-                      <MapPin className="w-3 h-3 text-sky-600 dark:text-sky-400" />
-                      <span>{loc}</span>
-                      <button
-                        type="button"
-                        onClick={() => setPickupLocations(pickupLocations.filter((_, idx) => idx !== i))}
-                        className="hover:text-rose-600 cursor-pointer"
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
+              {/* Campus & KTX Meetup Spots */}
+              <div className="p-3.5 rounded-2xl bg-slate-50/80 dark:bg-zinc-900/70 border border-slate-200/80 dark:border-zinc-800 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 uppercase tracking-wider">
+                    Địa điểm giao dịch (Ký túc xá, Cơ sở)
+                  </label>
+                  <span className="text-[11px] font-semibold text-sky-700 dark:text-sky-400">
+                    {pickupLocations.length} địa điểm
+                  </span>
                 </div>
 
-                <div className="flex gap-2">
+                {/* Selected locations */}
+                {pickupLocations.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {pickupLocations.map((loc, i) => (
+                      <span
+                        key={i}
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-sky-100 dark:bg-sky-950/80 text-sky-800 dark:text-sky-200 border border-sky-200 dark:border-sky-800"
+                      >
+                        <MapPin className="w-3 h-3 text-sky-600 dark:text-sky-400 shrink-0" />
+                        <span>{loc}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setHasCustomizedLocations(true);
+                            setPickupLocations(pickupLocations.filter((_, idx) => idx !== i));
+                          }}
+                          className="hover:text-rose-600 cursor-pointer font-bold"
+                          aria-label={`Xóa địa điểm ${loc}`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Quick select KTX & Campus spots */}
+                <div>
+                  <div className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400 mb-1.5">
+                    Chọn nhanh Ký túc xá / Cơ sở {selectedUni ? `(${selectedUni.shortName})` : ''}:
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {suggestedLocations.map((loc) => {
+                      const isSelected = pickupLocations.includes(loc);
+                      return (
+                        <button
+                          key={loc}
+                          type="button"
+                          onClick={() => handleToggleSuggestedLocation(loc)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer ${
+                            isSelected
+                              ? 'bg-[#4086ee] text-white border-[#4086ee]'
+                              : 'bg-white dark:bg-zinc-950 text-slate-700 dark:text-zinc-300 border-slate-200 dark:border-zinc-700 hover:border-sky-400'
+                          }`}
+                        >
+                          {isSelected ? '✓ ' : '+ '}
+                          {loc}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Custom KTX / Campus input */}
+                <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                  <select
+                    value={locationType}
+                    onChange={(e) => setLocationType(e.target.value as 'ktx' | 'campus' | 'other')}
+                    className="px-2.5 py-2 rounded-xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-slate-800 dark:text-white text-xs font-semibold focus:outline-hidden focus:border-sky-500"
+                  >
+                    <option value="ktx">Ký túc xá (KTX)</option>
+                    <option value="campus">Cơ sở trường</option>
+                    <option value="other">Điểm hẹn khác</option>
+                  </select>
                   <input
                     type="text"
-                    placeholder="Thêm điểm hẹn: Canteen C6, KTX Khu B cổng chính..."
+                    placeholder={
+                      locationType === 'ktx'
+                        ? 'Ví dụ: KTX Khu B tòa B4, KTX Bách Khoa...'
+                        : locationType === 'campus'
+                        ? 'Ví dụ: Cơ sở B - 279 Nguyễn Tri Phương, Cơ sở 2 Dĩ An...'
+                        : 'Ví dụ: Canteen C6, Cổng chính...'
+                    }
                     value={newLocationInput}
                     onChange={(e) => setNewLocationInput(e.target.value)}
-                    className="flex-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 text-xs focus:outline-hidden focus:border-sky-500"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddLocation();
+                      }
+                    }}
+                    className="flex-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 text-xs focus:outline-hidden focus:border-sky-500"
                   />
                   <button
                     type="button"
                     onClick={handleAddLocation}
-                    className="px-3 py-2 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-800 dark:text-white rounded-xl text-xs font-bold cursor-pointer"
+                    className="px-3.5 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold cursor-pointer shrink-0 transition-colors"
                   >
-                    + Thêm điểm
+                    + Thêm địa điểm
                   </button>
                 </div>
               </div>
@@ -551,6 +776,13 @@ export const PostBookModal: React.FC<PostBookModalProps> = ({
               </div>
             </div>
           )}
+
+          {stepError && (
+            <div className="mt-4 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 text-xs font-semibold text-rose-700 dark:text-rose-300 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{stepError}</span>
+            </div>
+          )}
         </div>
 
         {/* Modal Footer Controls */}
@@ -558,7 +790,10 @@ export const PostBookModal: React.FC<PostBookModalProps> = ({
           {step > 1 ? (
             <button
               type="button"
-              onClick={() => setStep(step - 1)}
+              onClick={() => {
+                setStepError(null);
+                setStep(step - 1);
+              }}
               className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-700 text-xs font-bold text-slate-700 dark:text-white hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors flex items-center gap-1.5 cursor-pointer"
             >
               <ArrowLeft className="w-4 h-4" />
@@ -571,7 +806,7 @@ export const PostBookModal: React.FC<PostBookModalProps> = ({
           {step < 4 ? (
             <button
               type="button"
-              onClick={() => setStep(step + 1)}
+              onClick={handleNextStep}
               className="px-6 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-black transition-all flex items-center gap-1.5 shadow-md shadow-sky-600/20 cursor-pointer"
             >
               <span>Tiếp tục</span>
