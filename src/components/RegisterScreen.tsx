@@ -19,10 +19,16 @@ import {
   User,
   Loader2,
 } from 'lucide-react';
+import {
+  isEmailRegisteredLocally,
+  isUsernameTakenLocally,
+  saveNewRegisteredAccount,
+} from '../utils/accountRegistry';
 
 interface RegisterScreenProps {
   universities: University[];
   onSwitchToLogin: () => void;
+  onSwitchToForgotPassword?: (prefillEmail?: string) => void;
   onCompleteRegister: (data: {
     username: string;
     universityName: string;
@@ -148,6 +154,7 @@ const RegisterDecorIllustration: React.FC = () => (
 export const RegisterScreen: React.FC<RegisterScreenProps> = ({
   universities,
   onSwitchToLogin,
+  onSwitchToForgotPassword,
   onCompleteRegister,
   onBackToHome,
 }) => {
@@ -198,7 +205,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
       const response = await fetch('/api/auth/request-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: targetEmail }),
+        body: JSON.stringify({ email: targetEmail, purpose: 'register' }),
       });
 
       const data = await response.json();
@@ -261,6 +268,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
   const handleStep1Submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanedUsername = username.trim();
+    const cleanedEmail = email.trim().toLowerCase();
 
     if (cleanedUsername.length < 3) {
       setErrorMsg('Vui lòng nhập Username (tối thiểu 3 ký tự).');
@@ -268,6 +276,10 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
     }
     if (/\s/.test(cleanedUsername)) {
       setErrorMsg('Username không được chứa khoảng trắng.');
+      return;
+    }
+    if (isUsernameTakenLocally(cleanedUsername)) {
+      setErrorMsg('Tên Username này đã có người sử dụng. Vui lòng chọn Username khác.');
       return;
     }
     if (!universityId) {
@@ -288,6 +300,12 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
       );
       return;
     }
+    if (isEmailRegisteredLocally(cleanedEmail)) {
+      setErrorMsg(
+        'Email này đã được đăng ký tài khoản. Mỗi email chỉ được tạo 1 tài khoản — vui lòng đăng nhập hoặc dùng Quên mật khẩu.'
+      );
+      return;
+    }
     if (password.length < 6) {
       setErrorMsg('Mật khẩu cần tối thiểu 6 ký tự.');
       return;
@@ -300,6 +318,28 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
       setErrorMsg('Vui lòng đồng ý với Điều khoản sử dụng và Chính sách bảo mật.');
       return;
     }
+
+    // Server-side uniqueness verification before sending OTP
+    try {
+      const checkRes = await fetch('/api/auth/check-availability', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanedEmail, username: cleanedUsername }),
+      });
+      if (checkRes.ok) {
+        const checkData = await checkRes.json();
+        if (checkData.emailTaken) {
+          setErrorMsg(
+            'Email này đã được đăng ký tài khoản. Mỗi email chỉ được tạo 1 tài khoản — vui lòng đăng nhập hoặc dùng Quên mật khẩu.'
+          );
+          return;
+        }
+        if (checkData.usernameTaken) {
+          setErrorMsg('Tên Username này đã có người sử dụng. Vui lòng chọn Username khác.');
+          return;
+        }
+      }
+    } catch {}
 
     setResendCount(0);
     const sentOk = await requestServerOtp(email, false);
@@ -346,28 +386,45 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
         return;
       }
 
-      // Verified successfully: create & save student account with Username
-      try {
-        const existingRaw = localStorage.getItem('unidoc_registered_accounts');
-        const existingList = existingRaw ? JSON.parse(existingRaw) : [];
-        const newAccount = {
+      // Register & persist account on server (enforces 1 email = 1 account & unique username)
+      const serverRegRes = await fetch('/api/auth/register-account', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: normalizedVerifiedEmail,
           username: username.trim(),
+          password,
           universityId,
           universityName: selectedUniversity?.shortName || 'ĐH Kinh tế TP.HCM',
           studentId: studentId.trim(),
-          email: normalizedVerifiedEmail,
-          verifiedAt: new Date().toISOString(),
-        };
-        const filtered = Array.isArray(existingList)
-          ? existingList.filter(
-              (acc: { email?: string }) => acc.email !== normalizedVerifiedEmail
-            )
-          : [];
-        localStorage.setItem(
-          'unidoc_registered_accounts',
-          JSON.stringify([newAccount, ...filtered])
+        }),
+      });
+
+      if (!serverRegRes.ok) {
+        const regErr = await serverRegRes.json().catch(() => ({}));
+        setErrorMsg(
+          regErr.error || 'Không thể hoàn tất đăng ký vì email hoặc Username đã tồn tại.'
         );
-      } catch {}
+        return;
+      }
+
+      // Save strictly without overwriting existing accounts
+      const localSave = saveNewRegisteredAccount({
+        username: username.trim(),
+        universityId,
+        universityName: selectedUniversity?.shortName || 'ĐH Kinh tế TP.HCM',
+        studentId: studentId.trim(),
+        email: normalizedVerifiedEmail,
+        password,
+        verifiedAt: new Date().toISOString(),
+      });
+
+      if (!localSave.saved) {
+        setErrorMsg(
+          localSave.error || 'Email hoặc Username này đã được đăng ký trước đó.'
+        );
+        return;
+      }
 
       setIsOtpActive(false);
       setStep(3);
@@ -887,16 +944,29 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
             </div>
           )}
 
-          {/* Bottom Link: "Đã có tài khoản? Đăng nhập" */}
-          <div className="pt-2 border-t border-[#edf8fe] dark:border-zinc-800 text-center text-xs sm:text-sm text-[#5b728f] dark:text-zinc-400">
-            Đã có tài khoản?{' '}
-            <button
-              type="button"
-              onClick={onSwitchToLogin}
-              className="font-bold text-[#4086ee] hover:text-[#0860c9] hover:underline cursor-pointer"
-            >
-              Đăng nhập
-            </button>
+          {/* Bottom Link: "Đã có tài khoản? Đăng nhập" + quick Forgot Password if needed */}
+          <div className="pt-2 border-t border-[#edf8fe] dark:border-zinc-800 text-center text-xs sm:text-sm text-[#5b728f] dark:text-zinc-400 space-y-1.5">
+            <div>
+              Đã có tài khoản?{' '}
+              <button
+                type="button"
+                onClick={onSwitchToLogin}
+                className="font-bold text-[#4086ee] hover:text-[#0860c9] hover:underline cursor-pointer"
+              >
+                Đăng nhập
+              </button>
+            </div>
+            {onSwitchToForgotPassword && (
+              <div className="text-xs">
+                <button
+                  type="button"
+                  onClick={() => onSwitchToForgotPassword(email.trim())}
+                  className="font-semibold text-[#5b728f] dark:text-zinc-400 hover:text-[#4086ee] hover:underline cursor-pointer"
+                >
+                  Quên mật khẩu tài khoản đã đăng ký?
+                </button>
+              </div>
+            )}
           </div>
         </section>
       </main>

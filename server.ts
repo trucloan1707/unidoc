@@ -31,9 +31,26 @@ interface StoredOtpRecord {
   code: string;
   expiresAt: number;
   invalidated: boolean;
+  purpose: 'register' | 'reset';
+}
+
+interface ServerAccountRecord {
+  email: string;
+  username: string;
+  passwordHash: string;
+  universityId?: string;
+  universityName?: string;
+  studentId?: string;
+  updatedAt: number;
 }
 
 const otpStore = new Map<string, StoredOtpRecord>();
+const serverAccountsByEmail = new Map<string, ServerAccountRecord>();
+const resetTokenStore = new Map<string, { token: string; expiresAt: number }>();
+
+function hashPassword(password: string): string {
+  return crypto.createHash('sha256').update(password).digest('hex');
+}
 
 /**
  * Quy tắc bắt buộc kiểm tra email .edu.vn & sinh mã xác minh 6 chữ số phía server:
@@ -95,13 +112,19 @@ export function validateAndGenerateEduOtp(rawEmail: unknown): OtpValidationResul
 async function sendPrivateVerificationEmail(
   recipientEmail: string,
   code: string,
-  expiresInMinutes: number
+  expiresInMinutes: number,
+  purpose: 'register' | 'reset' = 'register'
 ): Promise<{ sent: boolean; channel: 'resend' | 'smtp' | 'unconfigured'; detail?: string }> {
-  const subject = '[UniDoc] Mã xác minh tài khoản sinh viên của bạn';
+  const isReset = purpose === 'reset';
+  const subject = isReset
+    ? '[UniDoc] Mã xác thực đặt lại mật khẩu tài khoản'
+    : '[UniDoc] Mã xác minh tài khoản sinh viên của bạn';
   const textBody = [
     'Xin chào bạn,',
     '',
-    `Mã xác minh đăng ký tài khoản UniDoc của bạn là: ${code}`,
+    isReset
+      ? `Mã xác thực đặt lại mật khẩu UniDoc của bạn là: ${code}`
+      : `Mã xác minh đăng ký tài khoản UniDoc của bạn là: ${code}`,
     `Mã có hiệu lực trong vòng ${expiresInMinutes} phút (vui lòng nhập trong 60 giây trên màn hình xác thực).`,
     '',
     'Vì lý do bảo mật, tuyệt đối không chia sẻ mã này cho bất kỳ ai.',
@@ -111,9 +134,15 @@ async function sendPrivateVerificationEmail(
 
   const htmlBody = `
     <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; background: #edf8fe; padding: 24px; border-radius: 16px; border: 1px solid #b9e7ff;">
-      <h2 style="color: #0860c9; margin: 0 0 8px;">Xác minh tài khoản UniDoc</h2>
+      <h2 style="color: #0860c9; margin: 0 0 8px;">${
+        isReset ? 'Đặt lại mật khẩu UniDoc' : 'Xác minh tài khoản UniDoc'
+      }</h2>
       <p style="color: #334155; font-size: 14px; line-height: 1.6;">
-        Cảm ơn bạn đã đăng ký tài khoản sinh viên trên <strong>UniDoc</strong>. Vui lòng sử dụng mã xác minh riêng tư dưới đây để hoàn tất kích hoạt:
+        ${
+          isReset
+            ? 'Bạn vừa yêu cầu đặt lại mật khẩu cho tài khoản trên <strong>UniDoc</strong>. Vui lòng sử dụng mã xác thực dưới đây để tiếp tục:'
+            : 'Cảm ơn bạn đã đăng ký tài khoản sinh viên trên <strong>UniDoc</strong>. Vui lòng sử dụng mã xác minh riêng tư dưới đây để hoàn tất kích hoạt:'
+        }
       </p>
       <div style="background: #ffffff; border: 1px solid #b9e7ff; border-radius: 12px; padding: 16px; text-align: center; margin: 16px 0;">
         <span style="font-size: 28px; font-weight: 800; letter-spacing: 6px; color: #0860c9;">${code}</span>
@@ -224,8 +253,33 @@ async function startServer() {
     res.json({ authorized: true });
   });
 
+  // 1c. Check email & username uniqueness (1 account per email, unique username)
+  app.post('/api/auth/check-availability', (req: Request, res: Response) => {
+    const rawEmail = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const rawUsername =
+      typeof req.body?.username === 'string' ? req.body.username.trim().toLowerCase() : '';
+
+    const emailTaken =
+      rawEmail.length > 0 && (serverAccountsByEmail.has(rawEmail) || rawEmail === ADMIN_EMAIL);
+
+    let usernameTaken = false;
+    if (rawUsername.length > 0) {
+      for (const acc of serverAccountsByEmail.values()) {
+        if (acc.username.trim().toLowerCase() === rawUsername) {
+          if (!rawEmail || acc.email !== rawEmail) {
+            usernameTaken = true;
+            break;
+          }
+        }
+      }
+    }
+
+    res.json({ emailTaken, usernameTaken });
+  });
+
   // 2. Request private OTP sent directly to student's .edu.vn email (NEVER expose code in HTTP response)
   app.post('/api/auth/request-otp', async (req: Request, res: Response) => {
+    const purpose: 'register' | 'reset' = req.body?.purpose === 'reset' ? 'reset' : 'register';
     const result = validateAndGenerateEduOtp(req.body?.email);
 
     if (!result.valid) {
@@ -236,17 +290,28 @@ async function startServer() {
       return;
     }
 
+    if (purpose === 'register' && (serverAccountsByEmail.has(result.email) || result.email === ADMIN_EMAIL)) {
+      res.status(409).json({
+        valid: false,
+        emailTaken: true,
+        error: 'Email này đã được đăng ký tài khoản. Mỗi email chỉ được tạo 1 tài khoản.',
+      });
+      return;
+    }
+
     // Store OTP securely on server (invalidates any previous code for this email)
     otpStore.set(result.email, {
       code: result.verification_code,
       expiresAt: Date.now() + result.expires_in_minutes * 60 * 1000,
       invalidated: false,
+      purpose,
     });
 
     const delivery = await sendPrivateVerificationEmail(
       result.email,
       result.verification_code,
-      result.expires_in_minutes
+      result.expires_in_minutes,
+      purpose
     );
 
     if (!delivery.sent) {
@@ -321,9 +386,20 @@ async function startServer() {
     }
 
     otpStore.delete(rawEmail);
+
+    let resetToken: string | undefined;
+    if (record.purpose === 'reset') {
+      resetToken = crypto.randomBytes(24).toString('hex');
+      resetTokenStore.set(rawEmail, {
+        token: resetToken,
+        expiresAt: Date.now() + 10 * 60 * 1000,
+      });
+    }
+
     res.json({
       verified: true,
       email: rawEmail,
+      ...(resetToken ? { resetToken } : {}),
     });
   });
 
@@ -335,6 +411,153 @@ async function startServer() {
       otpStore.set(rawEmail, { ...existing, invalidated: true });
     }
     res.json({ invalidated: true });
+  });
+
+  // 5. Register account record on server (enforces 1 email = 1 account & unique username)
+  app.post('/api/auth/register-account', (req: Request, res: Response) => {
+    const rawEmail = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const rawUsername = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+    const rawPassword = typeof req.body?.password === 'string' ? req.body.password : '';
+
+    if (!rawEmail || !rawUsername || rawPassword.length < 6) {
+      res.status(400).json({
+        success: false,
+        error: 'Thông tin đăng ký chưa hợp lệ.',
+      });
+      return;
+    }
+
+    if (serverAccountsByEmail.has(rawEmail) || rawEmail === ADMIN_EMAIL) {
+      res.status(409).json({
+        success: false,
+        error: 'Email này đã được đăng ký tài khoản. Mỗi email chỉ được tạo 1 tài khoản.',
+      });
+      return;
+    }
+
+    const lowerUser = rawUsername.toLowerCase();
+    for (const acc of serverAccountsByEmail.values()) {
+      if (acc.username.trim().toLowerCase() === lowerUser) {
+        res.status(409).json({
+          success: false,
+          error: 'Tên Username này đã có người sử dụng. Vui lòng chọn Username khác.',
+        });
+        return;
+      }
+    }
+
+    serverAccountsByEmail.set(rawEmail, {
+      email: rawEmail,
+      username: rawUsername,
+      passwordHash: hashPassword(rawPassword),
+      universityId: typeof req.body?.universityId === 'string' ? req.body.universityId : undefined,
+      universityName:
+        typeof req.body?.universityName === 'string' ? req.body.universityName : undefined,
+      studentId: typeof req.body?.studentId === 'string' ? req.body.studentId : undefined,
+      updatedAt: Date.now(),
+    });
+
+    res.json({ success: true });
+  });
+
+  // 6. Verify login credentials against server-known accounts
+  app.post('/api/auth/verify-login', (req: Request, res: Response) => {
+    const rawEmail = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const rawPassword = typeof req.body?.password === 'string' ? req.body.password : '';
+
+    const account = serverAccountsByEmail.get(rawEmail);
+    if (!account) {
+      res.json({ verified: true, serverKnown: false });
+      return;
+    }
+
+    if (account.passwordHash !== hashPassword(rawPassword)) {
+      res.status(401).json({
+        verified: false,
+        serverKnown: true,
+        error: 'Mật khẩu không chính xác. Vui lòng thử lại hoặc nhấn Quên mật khẩu?',
+      });
+      return;
+    }
+
+    res.json({ verified: true, serverKnown: true });
+  });
+
+  // 7. Reset password after OTP verification
+  app.post('/api/auth/reset-password', (req: Request, res: Response) => {
+    const rawEmail = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const resetToken = typeof req.body?.resetToken === 'string' ? req.body.resetToken.trim() : '';
+    const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
+
+    if (!rawEmail || !resetToken || newPassword.length < 6) {
+      res.status(400).json({
+        success: false,
+        error: 'Yêu cầu đặt lại mật khẩu không hợp lệ.',
+      });
+      return;
+    }
+
+    const tokenRecord = resetTokenStore.get(rawEmail);
+    if (!tokenRecord || Date.now() > tokenRecord.expiresAt || tokenRecord.token !== resetToken) {
+      res.status(403).json({
+        success: false,
+        error: 'Phiên xác thực đặt lại mật khẩu đã hết hạn. Vui lòng xác thực email lại.',
+      });
+      return;
+    }
+
+    resetTokenStore.delete(rawEmail);
+
+    const existing = serverAccountsByEmail.get(rawEmail);
+    if (existing) {
+      serverAccountsByEmail.set(rawEmail, {
+        ...existing,
+        passwordHash: hashPassword(newPassword),
+        updatedAt: Date.now(),
+      });
+    } else {
+      serverAccountsByEmail.set(rawEmail, {
+        email: rawEmail,
+        username: rawEmail.split('@')[0],
+        passwordHash: hashPassword(newPassword),
+        updatedAt: Date.now(),
+      });
+    }
+
+    res.json({ success: true });
+  });
+
+  // 8. Update username uniqueness check on server
+  app.post('/api/auth/update-username', (req: Request, res: Response) => {
+    const rawEmail = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const rawUsername = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+
+    if (!rawEmail || rawUsername.length < 3) {
+      res.status(400).json({ success: false, error: 'Username tối thiểu 3 ký tự.' });
+      return;
+    }
+
+    const lowerUser = rawUsername.toLowerCase();
+    for (const acc of serverAccountsByEmail.values()) {
+      if (acc.email !== rawEmail && acc.username.trim().toLowerCase() === lowerUser) {
+        res.status(409).json({
+          success: false,
+          error: 'Tên Username này đã có người sử dụng. Vui lòng chọn Username khác.',
+        });
+        return;
+      }
+    }
+
+    const existing = serverAccountsByEmail.get(rawEmail);
+    if (existing) {
+      serverAccountsByEmail.set(rawEmail, {
+        ...existing,
+        username: rawUsername,
+        updatedAt: Date.now(),
+      });
+    }
+
+    res.json({ success: true });
   });
 
   // Mount Vite middleware in development or serve dist/ in production

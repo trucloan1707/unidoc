@@ -2,6 +2,7 @@ import React from 'react';
 import { Book } from '../types';
 import { HumorousBadge } from './HumorousBadge';
 import { BookCoverGraphic } from './BookCoverGraphic';
+import { RankAvatar } from './RankAvatar';
 import {
   Star,
   MapPin,
@@ -61,12 +62,19 @@ export const BookCard: React.FC<BookCardProps> = ({
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out"
         />
 
-        {/* Condition Badge */}
-        <span
-          className={`absolute top-2.5 left-2.5 text-[10px] font-bold px-2 py-0.5 rounded-md shadow-sm ${currentCondition.color}`}
-        >
-          {currentCondition.label}
-        </span>
+        {/* Featured / Condition Badge */}
+        <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
+          <span
+            className={`text-[10px] font-bold px-2 py-0.5 rounded-md shadow-sm ${currentCondition.color}`}
+          >
+            {currentCondition.label}
+          </span>
+          {book.seller.sellerBadge.tier >= 4 && (
+            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-gradient-to-r from-cyan-500 to-sky-600 text-white shadow-sm">
+              Tài liệu nổi bật
+            </span>
+          )}
+        </div>
 
         {/* Video Preview Tag */}
         {book.videoUrl && (
@@ -134,10 +142,12 @@ export const BookCard: React.FC<BookCardProps> = ({
           {/* Seller Profile & Humorous Badge */}
           <div className="mt-2 pt-2 border-t border-slate-100/80 dark:border-zinc-800 flex items-center justify-between gap-1">
             <div className="flex items-center gap-1.5 min-w-0">
-              <img
+              <RankAvatar
                 src={book.seller.avatar}
                 alt={book.seller.name}
-                className="w-5 h-5 rounded-full object-cover shrink-0 border border-slate-200 dark:border-zinc-700"
+                tier={book.seller.sellerBadge.tier}
+                size="xs"
+                fallbackText={book.seller.name.slice(0, 2).toUpperCase()}
               />
               <span className="text-[11px] font-medium text-slate-700 dark:text-white truncate max-w-[90px]">
                 {book.seller.name}

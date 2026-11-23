@@ -19,16 +19,16 @@ import { HumorousBadge } from './components/HumorousBadge';
 import { UniDocLogo } from './components/UniDocLogo';
 import { LoginScreen } from './components/LoginScreen';
 import { RegisterScreen } from './components/RegisterScreen';
+import { ForgotPasswordScreen } from './components/ForgotPasswordScreen';
 import { AuthRequiredModal } from './components/AuthRequiredModal';
+import { getRankBadgeForCount } from './components/RankAvatar';
+import { getRandomAnimalAvatar, isCustomUploadedAvatar } from './utils/animalAvatars';
 import {
   INITIAL_BOOKS,
   INITIAL_REVIEWS,
   UNIVERSITIES,
   CATEGORIES,
   INITIAL_VERIFICATIONS,
-  INITIAL_ORDERS,
-  INITIAL_NOTIFICATIONS,
-  HUMOROUS_SELLER_BADGES,
   HUMOROUS_BUYER_BADGES,
 } from './data/mockData';
 import { Book, BookReview, CartItem, VerificationRequest, AppNotification } from './types';
@@ -48,6 +48,104 @@ import {
   ArrowUpDown,
   Search,
 } from 'lucide-react';
+
+interface StoredUserActivity {
+  orders: any[];
+  likedBookIds: string[];
+  viewedBookIds: string[];
+  notifications: AppNotification[];
+}
+
+const getActivityStorageKey = (email: string) =>
+  `unidoc_activity_${email.trim().toLowerCase()}`;
+
+function loadInitialBooksFromStorage(): Book[] {
+  let deletedIds: string[] = [];
+  let userPosted: Book[] = [];
+  try {
+    const deletedRaw = localStorage.getItem('unidoc_deleted_book_ids');
+    const parsedDeleted = deletedRaw ? JSON.parse(deletedRaw) : [];
+    if (Array.isArray(parsedDeleted)) {
+      deletedIds = parsedDeleted;
+    }
+    const postedRaw = localStorage.getItem('unidoc_user_posted_books');
+    const parsedPosted = postedRaw ? JSON.parse(postedRaw) : [];
+    if (Array.isArray(parsedPosted)) {
+      userPosted = parsedPosted;
+    }
+  } catch {}
+
+  const seenIds = new Set<string>();
+  const combined: Book[] = [];
+  for (const b of [...userPosted, ...INITIAL_BOOKS]) {
+    if (b && b.id && !deletedIds.includes(b.id) && !seenIds.has(b.id)) {
+      seenIds.add(b.id);
+      combined.push(b);
+    }
+  }
+  return combined;
+}
+
+function loadInitialReviewsFromStorage(): BookReview[] {
+  let userReviews: BookReview[] = [];
+  try {
+    const raw = localStorage.getItem('unidoc_user_reviews');
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(parsed)) {
+      userReviews = parsed;
+    }
+  } catch {}
+
+  const seenIds = new Set<string>();
+  const combined: BookReview[] = [];
+  for (const r of [...userReviews, ...INITIAL_REVIEWS]) {
+    if (r && r.id && !seenIds.has(r.id)) {
+      seenIds.add(r.id);
+      combined.push(r);
+    }
+  }
+  return combined;
+}
+
+function loadStoredActivity(
+  email: string,
+  availableBooks: Book[]
+): {
+  orders: any[];
+  likedBookIds: string[];
+  viewedBooks: Book[];
+  notifications: AppNotification[];
+} {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) {
+    return { orders: [], likedBookIds: [], viewedBooks: [], notifications: [] };
+  }
+  try {
+    const raw = localStorage.getItem(getActivityStorageKey(normalized));
+    if (!raw) {
+      return { orders: [], likedBookIds: [], viewedBooks: [], notifications: [] };
+    }
+    const parsed = JSON.parse(raw) as Partial<StoredUserActivity>;
+    const orders = Array.isArray(parsed.orders) ? parsed.orders : [];
+    const likedBookIds = Array.isArray(parsed.likedBookIds) ? parsed.likedBookIds : [];
+    const viewedBookIds = Array.isArray(parsed.viewedBookIds) ? parsed.viewedBookIds : [];
+    const viewedBooks = viewedBookIds
+      .map((id) => availableBooks.find((b) => b.id === id))
+      .filter((b): b is Book => Boolean(b));
+    const notifications = Array.isArray(parsed.notifications) ? parsed.notifications : [];
+    return { orders, likedBookIds, viewedBooks, notifications };
+  } catch {
+    return { orders: [], likedBookIds: [], viewedBooks: [], notifications: [] };
+  }
+}
+
+function saveStoredActivity(email: string, activity: StoredUserActivity) {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return;
+  try {
+    localStorage.setItem(getActivityStorageKey(normalized), JSON.stringify(activity));
+  } catch {}
+}
 
 export default function App() {
   // Theme state: Sáng / Tối (Dark / Light mode)
@@ -73,7 +171,10 @@ export default function App() {
 
   // App navigation & authentication state ('home' | 'favorites' | 'profile')
   const [currentNavTab, setCurrentNavTab] = useState<'home' | 'favorites' | 'profile'>('home');
-  const [authScreen, setAuthScreen] = useState<'login' | 'register' | null>(null);
+  const [authScreen, setAuthScreen] = useState<'login' | 'register' | 'forgot-password' | null>(
+    null
+  );
+  const [authPrefillEmail, setAuthPrefillEmail] = useState<string>('');
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
     try {
       return localStorage.getItem('unidoc_is_logged_in') === 'true';
@@ -89,7 +190,48 @@ export default function App() {
       return '';
     }
   });
+  const [userAvatar, setUserAvatar] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('unidoc_user_profile');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (
+          typeof parsed.avatar === 'string' &&
+          parsed.avatar.trim().length > 0 &&
+          !parsed.avatar.includes('photo-1534528741775-53994a69daeb')
+        ) {
+          return parsed.avatar;
+        }
+      }
+    } catch {}
+    return getRandomAnimalAvatar();
+  });
+  const [userDisplayName, setUserDisplayName] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('unidoc_user_profile');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.username || parsed.name || '';
+      }
+    } catch {}
+    return '';
+  });
+  const [userUniversity, setUserUniversity] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('unidoc_user_profile');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.university || 'ĐH Kinh tế TP.HCM';
+      }
+    } catch {}
+    return 'ĐH Kinh tế TP.HCM';
+  });
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [checkoutToast, setCheckoutToast] = useState<string | null>(null);
+
+  const currentUserId = currentUserEmail
+    ? `user_${currentUserEmail.trim().toLowerCase()}`
+    : 'user_guest';
 
   const verifyAdminStatus = async (emailToCheck: string) => {
     const normalized = emailToCheck.trim().toLowerCase();
@@ -159,34 +301,47 @@ export default function App() {
   };
 
   // App core data state (excluding listings removed by administrator)
-  const [books, setBooks] = useState<Book[]>(() => {
-    try {
-      const deletedRaw = localStorage.getItem('unidoc_deleted_book_ids');
-      const deletedIds: string[] = deletedRaw ? JSON.parse(deletedRaw) : [];
-      if (Array.isArray(deletedIds) && deletedIds.length > 0) {
-        return INITIAL_BOOKS.filter((b) => !deletedIds.includes(b.id));
-      }
-    } catch {}
-    return INITIAL_BOOKS;
-  });
-  const [reviews, setReviews] = useState<BookReview[]>(INITIAL_REVIEWS);
-  const [orders, setOrders] = useState<any[]>(INITIAL_ORDERS);
-  const [notifications, setNotifications] = useState<AppNotification[]>(INITIAL_NOTIFICATIONS);
+  const [books, setBooks] = useState<Book[]>(() => loadInitialBooksFromStorage());
+  const [reviews, setReviews] = useState<BookReview[]>(() => loadInitialReviewsFromStorage());
   const [verifications, setVerifications] = useState<VerificationRequest[]>(INITIAL_VERIFICATIONS);
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
-  const [likedBookIds, setLikedBookIds] = useState<string[]>([
-    'fav_kinh_te_vi_mo',
-    'fav_marketing_pdf',
-    'fav_excel_qttc',
-    'book_1',
-    'book_3',
-    'fav_phap_luat_doc',
-  ]);
-  const [viewedBooks, setViewedBooks] = useState<Book[]>([
-    INITIAL_BOOKS[0],
-    INITIAL_BOOKS[1],
-    INITIAL_BOOKS[2],
-  ]);
+
+  // Per-user personal activity (empty by default for new & first-time logged-in accounts)
+  const [activeActivityEmail, setActiveActivityEmail] = useState<string>(() =>
+    isLoggedIn && currentUserEmail ? currentUserEmail.trim().toLowerCase() : ''
+  );
+  const [orders, setOrders] = useState<any[]>(() =>
+    isLoggedIn && currentUserEmail
+      ? loadStoredActivity(currentUserEmail, loadInitialBooksFromStorage()).orders
+      : []
+  );
+  const [notifications, setNotifications] = useState<AppNotification[]>(() =>
+    isLoggedIn && currentUserEmail
+      ? loadStoredActivity(currentUserEmail, loadInitialBooksFromStorage()).notifications
+      : []
+  );
+  const [likedBookIds, setLikedBookIds] = useState<string[]>(() =>
+    isLoggedIn && currentUserEmail
+      ? loadStoredActivity(currentUserEmail, loadInitialBooksFromStorage()).likedBookIds
+      : []
+  );
+  const [viewedBooks, setViewedBooks] = useState<Book[]>(() =>
+    isLoggedIn && currentUserEmail
+      ? loadStoredActivity(currentUserEmail, loadInitialBooksFromStorage()).viewedBooks
+      : []
+  );
+
+  useEffect(() => {
+    const normalized = currentUserEmail.trim().toLowerCase();
+    if (isLoggedIn && normalized && activeActivityEmail === normalized) {
+      saveStoredActivity(normalized, {
+        orders,
+        likedBookIds,
+        viewedBookIds: viewedBooks.map((b) => b.id),
+        notifications,
+      });
+    }
+  }, [isLoggedIn, currentUserEmail, activeActivityEmail, orders, likedBookIds, viewedBooks, notifications]);
 
   // Filters & Search (theo ngành, theo trường)
   const [selectedUniversityId, setSelectedUniversityId] = useState<string>('all');
@@ -209,8 +364,17 @@ export default function App() {
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
 
-  // User simulated badge
-  const currentUserBuyerBadge = HUMOROUS_BUYER_BADGES[1]; // Thần Đồng Ôn Thi Giờ Chót
+  // User real activity counts & dynamic rank badge
+  const myBooks = isLoggedIn ? books.filter((b) => b.seller.id === currentUserId) : [];
+  const myReviews = isLoggedIn ? reviews.filter((r) => r.reviewerId === currentUserId) : [];
+  const currentRankBadge = isLoggedIn
+    ? getRankBadgeForCount(myBooks.length + orders.length)
+    : null;
+  const currentRankTier = currentRankBadge?.tier ?? 0;
+  const currentUserBuyerBadge =
+    HUMOROUS_BUYER_BADGES.slice()
+      .reverse()
+      .find((b) => orders.length >= b.minThreshold) || HUMOROUS_BUYER_BADGES[0];
 
   // Filtering logic: Lọc sách theo ngành, theo trường và từ khóa
   const filteredBooks = books.filter((book) => {
@@ -319,11 +483,27 @@ export default function App() {
       createdAt: 'Vừa xong',
       likes: 0,
     };
-    setReviews([newRev, ...reviews]);
+    setReviews((prev) => [newRev, ...prev]);
+    try {
+      const raw = localStorage.getItem('unidoc_user_reviews');
+      const prevSaved: BookReview[] = raw ? JSON.parse(raw) : [];
+      localStorage.setItem(
+        'unidoc_user_reviews',
+        JSON.stringify([newRev, ...(Array.isArray(prevSaved) ? prevSaved : [])])
+      );
+    } catch {}
   };
 
   const handleAddNewBook = (newBook: Book) => {
-    setBooks([newBook, ...books]);
+    setBooks((prev) => [newBook, ...prev]);
+    try {
+      const raw = localStorage.getItem('unidoc_user_posted_books');
+      const prevSaved: Book[] = raw ? JSON.parse(raw) : [];
+      localStorage.setItem(
+        'unidoc_user_posted_books',
+        JSON.stringify([newBook, ...(Array.isArray(prevSaved) ? prevSaved : [])])
+      );
+    } catch {}
     // Also notify
     const notif: AppNotification = {
       id: `notif_${Date.now()}`,
@@ -334,11 +514,24 @@ export default function App() {
       read: false,
       relatedBookTitle: newBook.title,
     };
-    setNotifications([notif, ...notifications]);
+    setNotifications((prev) => [notif, ...prev]);
   };
 
   const handleDeleteMyBook = (bookId: string) => {
-    setBooks(books.filter((b) => b.id !== bookId));
+    setBooks((prev) => prev.filter((b) => b.id !== bookId));
+    setCartItems((prev) => prev.filter((item) => item.book.id !== bookId));
+    setLikedBookIds((prev) => prev.filter((id) => id !== bookId));
+    setViewedBooks((prev) => prev.filter((b) => b.id !== bookId));
+    try {
+      const raw = localStorage.getItem('unidoc_user_posted_books');
+      const prevSaved: Book[] = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(prevSaved)) {
+        localStorage.setItem(
+          'unidoc_user_posted_books',
+          JSON.stringify(prevSaved.filter((b) => b.id !== bookId))
+        );
+      }
+    } catch {}
   };
 
   const handleAdminDeleteBook = async (bookId: string): Promise<boolean> => {
@@ -372,6 +565,14 @@ export default function App() {
     setViewedBooks((prev) => prev.filter((b) => b.id !== bookId));
 
     try {
+      const postedRaw = localStorage.getItem('unidoc_user_posted_books');
+      const prevPosted: Book[] = postedRaw ? JSON.parse(postedRaw) : [];
+      if (Array.isArray(prevPosted)) {
+        localStorage.setItem(
+          'unidoc_user_posted_books',
+          JSON.stringify(prevPosted.filter((b) => b.id !== bookId))
+        );
+      }
       const deletedRaw = localStorage.getItem('unidoc_deleted_book_ids');
       const deletedIds: string[] = deletedRaw ? JSON.parse(deletedRaw) : [];
       const nextDeleted = Array.isArray(deletedIds)
@@ -437,7 +638,12 @@ export default function App() {
     setCartItems([]);
     setIsCartOpen(false);
     setCurrentNavTab('profile');
-    alert('Đặt sách thành công! Đơn hàng đã được chuyển vào mục "Chờ xác nhận" trong Trang cá nhân của bạn.');
+    setCheckoutToast(
+      'Đặt sách thành công! Đơn hàng đã được chuyển vào mục "Lịch sử mua hàng" và bạn đã tích Điểm uy tín.'
+    );
+    setTimeout(() => {
+      setCheckoutToast(null);
+    }, 5000);
   };
 
   const handleMarkAllNotificationsRead = () => {
@@ -449,9 +655,15 @@ export default function App() {
   if (authScreen === 'login') {
     return (
       <LoginScreen
+        initialEmail={authPrefillEmail}
         onSwitchToRegister={() => setAuthScreen('register')}
+        onSwitchToForgotPassword={(typedEmail) => {
+          if (typedEmail) setAuthPrefillEmail(typedEmail);
+          setAuthScreen('forgot-password');
+        }}
         onLoginSuccess={async (loggedInEmail) => {
           const normalized = loggedInEmail.trim().toLowerCase();
+          setAuthPrefillEmail('');
           try {
             const accRaw = localStorage.getItem('unidoc_registered_accounts');
             const accList = accRaw ? JSON.parse(accRaw) : [];
@@ -468,21 +680,39 @@ export default function App() {
               matchedAccount?.username ||
               (prev.email?.toLowerCase() === normalized ? prev.username || prev.name : '') ||
               normalized.split('@')[0];
+            const resolvedUniversity =
+              matchedAccount?.universityName ||
+              (prev.email?.toLowerCase() === normalized ? prev.university : '') ||
+              'ĐH Kinh tế TP.HCM';
 
+            const resolvedAvatar =
+              prev.email?.toLowerCase() === normalized && isCustomUploadedAvatar(prev.avatar)
+                ? prev.avatar
+                : getRandomAnimalAvatar();
+
+            setUserAvatar(resolvedAvatar);
+            setUserDisplayName(resolvedUsername);
+            setUserUniversity(resolvedUniversity);
             localStorage.setItem(
               'unidoc_user_profile',
               JSON.stringify({
                 name: resolvedUsername,
                 username: resolvedUsername,
-                avatar: prev.avatar || '',
+                avatar: resolvedAvatar,
                 email: normalized,
-                university:
-                  matchedAccount?.universityName ||
-                  (prev.email?.toLowerCase() === normalized ? prev.university : '') ||
-                  'ĐH Kinh tế TP.HCM',
+                university: resolvedUniversity,
               })
             );
-          } catch {}
+          } catch {
+            setUserAvatar(getRandomAnimalAvatar());
+          }
+          const loaded = loadStoredActivity(normalized, books);
+          setOrders(loaded.orders);
+          setLikedBookIds(loaded.likedBookIds);
+          setViewedBooks(loaded.viewedBooks);
+          setNotifications(loaded.notifications);
+          setCartItems([]);
+          setActiveActivityEmail(normalized);
           handleSetLoggedIn(true, normalized);
           await verifyAdminStatus(normalized);
           setAuthScreen(null);
@@ -493,27 +723,70 @@ export default function App() {
     );
   }
 
+  if (authScreen === 'forgot-password') {
+    return (
+      <ForgotPasswordScreen
+        initialEmail={authPrefillEmail}
+        onReturnToLogin={(verifiedEmail) => {
+          if (verifiedEmail) setAuthPrefillEmail(verifiedEmail);
+          setAuthScreen('login');
+        }}
+        onSwitchToRegister={() => setAuthScreen('register')}
+        onBackToHome={() => setAuthScreen(null)}
+      />
+    );
+  }
+
   if (authScreen === 'register') {
     return (
       <RegisterScreen
         universities={UNIVERSITIES}
         onSwitchToLogin={() => setAuthScreen('login')}
+        onSwitchToForgotPassword={(typedEmail) => {
+          if (typedEmail) setAuthPrefillEmail(typedEmail);
+          setAuthScreen('forgot-password');
+        }}
         onCompleteRegister={async (data) => {
           const normalized = data.email.trim().toLowerCase();
+          const resolvedUniversity = data.universityName || 'ĐH Kinh tế TP.HCM';
+          setAuthPrefillEmail('');
           try {
             const raw = localStorage.getItem('unidoc_user_profile');
             const prev = raw ? JSON.parse(raw) : {};
+            const resolvedAvatar =
+              prev.email?.toLowerCase() === normalized && isCustomUploadedAvatar(prev.avatar)
+                ? prev.avatar
+                : getRandomAnimalAvatar();
+
+            setUserAvatar(resolvedAvatar);
+            setUserDisplayName(data.username);
+            setUserUniversity(resolvedUniversity);
             localStorage.setItem(
               'unidoc_user_profile',
               JSON.stringify({
                 name: data.username,
                 username: data.username,
-                avatar: prev.avatar || '',
+                avatar: resolvedAvatar,
                 email: normalized,
-                university: data.universityName || 'ĐH Kinh tế TP.HCM',
+                university: resolvedUniversity,
               })
             );
-          } catch {}
+          } catch {
+            setUserAvatar(getRandomAnimalAvatar());
+          }
+          // Brand new account: strictly zero activity across all sections
+          saveStoredActivity(normalized, {
+            orders: [],
+            likedBookIds: [],
+            viewedBookIds: [],
+            notifications: [],
+          });
+          setOrders([]);
+          setLikedBookIds([]);
+          setViewedBooks([]);
+          setNotifications([]);
+          setCartItems([]);
+          setActiveActivityEmail(normalized);
           handleSetLoggedIn(true, normalized);
           await verifyAdminStatus(normalized);
           setAuthScreen(null);
@@ -571,7 +844,7 @@ export default function App() {
           requireAuth('xem thông báo tài khoản', () => setIsNotificationsOpen(true))
         }
         unreadNotificationsCount={isLoggedIn ? unreadNotifsCount : 0}
-        unreadMessagesCount={isLoggedIn ? 2 : 0}
+        unreadMessagesCount={0}
         favoritesCount={isLoggedIn ? likedBookIds.length : 0}
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode(!darkMode)}
@@ -579,7 +852,25 @@ export default function App() {
         onOpenRegister={() => setAuthScreen('register')}
         isLoggedIn={isLoggedIn}
         isAdmin={isAdmin}
+        userAvatar={userAvatar}
+        userDisplayName={userDisplayName}
+        userRankTier={currentRankTier}
       />
+
+      {checkoutToast && (
+        <div className="max-w-3xl mx-auto px-4 pt-3 w-full">
+          <div className="p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs sm:text-sm font-semibold flex items-center justify-between gap-3 shadow-sm">
+            <span>{checkoutToast}</span>
+            <button
+              type="button"
+              onClick={() => setCheckoutToast(null)}
+              className="text-xs font-bold underline cursor-pointer shrink-0"
+            >
+              Đóng
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* VIEW ROUTING: HOME VIEW VS FAVORITES VIEW VS PERSONAL PROFILE VIEW */}
       {isLoggedIn && currentNavTab === 'favorites' ? (
@@ -606,9 +897,9 @@ export default function App() {
         <ProfileView
           orders={orders}
           viewedBooks={viewedBooks}
-          anonymousReviews={reviews.filter((r) => r.isAnonymous)}
+          anonymousReviews={myReviews}
           favoritesCount={likedBookIds.length}
-          postedBooksCount={books.filter((b) => b.seller.id === 'user_viet_anh').length}
+          postedBooksCount={myBooks.length}
           darkMode={darkMode}
           onToggleDarkMode={() => setDarkMode(!darkMode)}
           onSelectBook={(b) => handleSelectBook(b)}
@@ -616,6 +907,10 @@ export default function App() {
           onOpenTitlesGuide={() => setIsTitlesGuideOpen(true)}
           onOpenVerification={() => setIsVerificationOpen(true)}
           onOpenSellerDashboard={() => setIsSellerDashboardOpen(true)}
+          onOpenPostBook={() => {
+            scrollToTop();
+            setIsPostModalOpen(true);
+          }}
           onNavigateFavorites={() => {
             scrollToTop();
             setCurrentNavTab('favorites');
@@ -626,10 +921,19 @@ export default function App() {
           }}
           onOpenChatWithSeller={(b) => handleStartChatWithSeller(b)}
           onLogout={() => {
+            setOrders([]);
+            setLikedBookIds([]);
+            setViewedBooks([]);
+            setNotifications([]);
+            setCartItems([]);
+            setActiveActivityEmail('');
+            setUserDisplayName('');
             handleSetLoggedIn(false);
             setCurrentNavTab('home');
             setAuthScreen('login');
           }}
+          onAvatarUpdated={(nextAvatar) => setUserAvatar(nextAvatar)}
+          onUsernameUpdated={(nextName) => setUserDisplayName(nextName)}
         />
       ) : (
         /* HOMEPAGE VIEW */
@@ -671,44 +975,44 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Humorous Title Spotlight Widget */}
+              {/* Bảng Vàng UniDoc Spotlight Widget */}
               <div className="bg-slate-900/80 backdrop-blur-md border border-white/20 p-4 rounded-3xl max-w-sm w-full text-white shadow-2xl shrink-0">
                 <div className="flex items-center justify-between border-b border-white/10 pb-2.5 mb-2.5">
                   <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5" /> Bảng Vinh Danh Tuần Này
+                    <Sparkles className="w-3.5 h-3.5" /> Bảng Vàng UniDoc
                   </span>
                   <button
                     onClick={() => requireAuth('xem bảng Danh hiệu', () => setIsTitlesGuideOpen(true))}
                     className="text-[11px] text-sky-300 hover:text-white underline cursor-pointer"
                   >
-                    Xem tất cả
+                    Xem 5 Hạng
                   </button>
                 </div>
 
                 <div className="space-y-2.5">
-                  <div className="flex items-center justify-between p-2 rounded-xl bg-white/5 border border-white/10">
+                  <div className="flex items-center justify-between p-2 rounded-xl bg-amber-500/10 border border-amber-400/30">
                     <div className="flex items-center gap-2">
-                      <span className="text-lg">⚔️</span>
+                      <span className="text-lg">👑</span>
                       <div>
-                        <div className="text-xs font-bold text-emerald-300">Chiến Thần Pass Sách K70</div>
-                        <div className="text-[10px] text-slate-400">Vũ Việt Anh (14 sách đã pass)</div>
+                        <div className="text-xs font-bold text-amber-300">Huyền Thoại Tàng Kinh Các</div>
+                        <div className="text-[10px] text-slate-300">Trên 50 sách/tài liệu • Khung Vàng lấp lánh</div>
                       </div>
                     </div>
-                    <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950 px-1.5 py-0.5 rounded">
-                      Tier 2
+                    <span className="text-[10px] font-mono text-amber-300 bg-amber-950 px-1.5 py-0.5 rounded shrink-0">
+                      Hạng 5
                     </span>
                   </div>
 
-                  <div className="flex items-center justify-between p-2 rounded-xl bg-white/5 border border-white/10">
+                  <div className="flex items-center justify-between p-2 rounded-xl bg-sky-500/10 border border-cyan-400/30">
                     <div className="flex items-center gap-2">
-                      <span className="text-lg">⚡</span>
+                      <span className="text-lg">💎</span>
                       <div>
-                        <div className="text-xs font-bold text-amber-300">Thần Đồng Ôn Thi Giờ Chót</div>
-                        <div className="text-[10px] text-slate-400">Trần Văn Nam (6 sách đã săn)</div>
+                        <div className="text-xs font-bold text-cyan-300">Đại Sư Tàng Thư</div>
+                        <div className="text-[10px] text-slate-300">31 – 40 sách • Khung Bạch Kim phát sáng</div>
                       </div>
                     </div>
-                    <span className="text-[10px] font-mono text-amber-400 bg-amber-950 px-1.5 py-0.5 rounded">
-                      Tier 2
+                    <span className="text-[10px] font-mono text-cyan-300 bg-sky-950 px-1.5 py-0.5 rounded shrink-0">
+                      Hạng 4
                     </span>
                   </div>
                 </div>
@@ -1000,14 +1304,14 @@ export default function App() {
             <section className="bg-gradient-to-r from-sky-900 via-blue-900 to-slate-900 rounded-3xl p-6 text-white border border-sky-700/60 shadow-xl flex flex-col md:flex-row items-center justify-between gap-6">
               <div className="space-y-2 text-center md:text-left">
                 <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black text-xs">
-                  <Sparkles className="w-3.5 h-3.5" /> TÍNH NĂNG ĐỘC QUYỀN UNIDOC
+                  <Sparkles className="w-3.5 h-3.5" /> HỆ THỐNG DANH HIỆU UNIDOC
                 </div>
                 <h3 className="text-xl font-black text-white">
-                  Hệ Thống Danh Hiệu Sinh Viên
+                  Thăng Hạng Từ Sứ Giả Sách Mới Đến Huyền Thoại Tàng Kinh Các
                 </h3>
                 <p className="text-xs sm:text-sm text-slate-300 max-w-xl">
-                  Càng pass nhiều sách cũ hoặc càng săn nhiều giáo trình, bạn càng nhận được danh hiệu uy tín như{' '}
-                  <b>"Chiến Thần Pass Sách K70"</b> hay <b>"Mọt Sách Xuyên Lục Địa"</b> cùng nhiều ưu đãi phí sàn và quà tặng KTX!
+                  Tích lũy sách và tài liệu để mở khóa khung Avatar{' '}
+                  <b>Đồng · Bạc · Vàng · Bạch Kim phát sáng · Vàng lấp lánh</b>, ghim bài đăng, tự động duyệt tin, vinh danh <b>Bảng Vàng UniDoc</b> và Voucher giảm 10k!
                 </p>
               </div>
 
@@ -1122,6 +1426,11 @@ export default function App() {
           isOpen={!!selectedBookForReview}
           onClose={() => setSelectedBookForReview(null)}
           onSubmitReview={(newRev) => handleAddReview(newRev)}
+          currentUser={{
+            id: currentUserId,
+            name: userDisplayName || 'Sinh viên UniDoc',
+            avatar: userAvatar,
+          }}
         />
       )}
 
@@ -1131,14 +1440,23 @@ export default function App() {
         onClose={() => setIsPostModalOpen(false)}
         universities={UNIVERSITIES}
         onAddBook={(newBook) => handleAddNewBook(newBook)}
+        currentSellerSalesCount={myBooks.length}
+        currentUser={{
+          id: currentUserId,
+          name: userDisplayName || 'Sinh viên UniDoc',
+          avatar: userAvatar,
+          university: userUniversity,
+        }}
       />
 
-      {/* 5. Humorous Titles & Badges Guide Modal */}
+      {/* 5. UniDoc Rank & Badges Guide Modal */}
       <HumorousTitlesGuideModal
         isOpen={isTitlesGuideOpen}
         onClose={() => setIsTitlesGuideOpen(false)}
-        userSalesCount={5}
-        userBuyCount={6}
+        userSalesCount={myBooks.length}
+        userBuyCount={orders.length}
+        userAvatar={userAvatar}
+        userName={userDisplayName || 'Sinh viên UniDoc'}
       />
 
       {/* 6. Cart Drawer & Checkout Flow */}
@@ -1151,6 +1469,7 @@ export default function App() {
           setCartItems(cartItems.map((i) => (i.book.id === id ? { ...i, quantity: q } : i)))
         }
         onCheckout={handleCheckoutSuccess}
+        userRankTier={currentRankTier}
       />
 
       {/* 7. Chat Drawer with Seller */}
@@ -1173,7 +1492,7 @@ export default function App() {
       <SellerDashboardModal
         isOpen={isSellerDashboardOpen}
         onClose={() => setIsSellerDashboardOpen(false)}
-        myBooks={books.filter((b) => b.seller.id === 'user_viet_anh')}
+        myBooks={myBooks}
         onOpenPostBook={() => setIsPostModalOpen(true)}
         onDeleteBook={(id) => handleDeleteMyBook(id)}
       />

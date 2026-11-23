@@ -30,7 +30,15 @@ import {
   ShoppingCart,
   Camera,
   Upload,
+  Shuffle,
 } from 'lucide-react';
+import { getRandomAnimalAvatar } from '../utils/animalAvatars';
+import { RankAvatar, getRankBadgeForCount } from './RankAvatar';
+import { HumorousBadge } from './HumorousBadge';
+import {
+  isUsernameTakenLocally,
+  updateAccountUsernameLocally,
+} from '../utils/accountRegistry';
 
 interface UserProfile {
   name: string;
@@ -62,10 +70,13 @@ interface ProfileViewProps {
   onOpenTitlesGuide: () => void;
   onOpenVerification: () => void;
   onOpenSellerDashboard: () => void;
+  onOpenPostBook?: () => void;
   onNavigateFavorites: () => void;
   onBackToHome: () => void;
   onOpenChatWithSeller?: (book: Book) => void;
   onLogout?: () => void;
+  onAvatarUpdated?: (avatarUrl: string) => void;
+  onUsernameUpdated?: (username: string) => void;
 }
 
 type ActiveSubView =
@@ -170,32 +181,43 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onOpenTitlesGuide,
   onOpenVerification,
   onOpenSellerDashboard,
+  onOpenPostBook,
   onNavigateFavorites,
   onBackToHome,
   onLogout,
+  onAvatarUpdated,
+  onUsernameUpdated,
 }) => {
-  const DEFAULT_AVATAR =
-    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=240&auto=format&fit=crop&q=80';
-
   const [profile, setProfile] = useState<UserProfile>(() => {
+    const randomAnimal = getRandomAnimalAvatar();
     const fallback: UserProfile = {
       name: 'sinhvien_unidoc',
       username: 'sinhvien_unidoc',
       email: 'minhanh@edu.vn',
       university: 'ĐH Kinh tế TP.HCM',
-      avatar: DEFAULT_AVATAR,
+      avatar: randomAnimal,
     };
     try {
       const saved = localStorage.getItem('unidoc_user_profile');
       if (saved) {
         const parsed = JSON.parse(saved);
         const resolvedUsername = parsed.username || parsed.name || fallback.name;
-        return {
+        const hasValidAvatar =
+          typeof parsed.avatar === 'string' &&
+          parsed.avatar.trim().length > 0 &&
+          !parsed.avatar.includes('photo-1534528741775-53994a69daeb');
+        const resolvedAvatar = hasValidAvatar ? parsed.avatar : randomAnimal;
+        const nextProfile = {
           ...fallback,
           ...parsed,
           name: resolvedUsername,
           username: resolvedUsername,
+          avatar: resolvedAvatar,
         };
+        if (!hasValidAvatar) {
+          localStorage.setItem('unidoc_user_profile', JSON.stringify(nextProfile));
+        }
+        return nextProfile;
       }
     } catch {}
     return fallback;
@@ -213,20 +235,32 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   // Edit profile modal state
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [draftProfile, setDraftProfile] = useState<UserProfile>(profile);
+  const [profileEditError, setProfileEditError] = useState<string | null>(null);
 
-  // Reports state
-  const [reports, setReports] = useState<ReportItem[]>([
-    {
-      id: 'rep_1',
-      title: 'Xác minh tình trạng sách giao dịch #UD-510924',
-      target: 'Đơn sách Triết học Mác - Lênin',
-      status: 'resolved',
-      date: '4 ngày trước',
-      detail: 'Ban quản trị UniDoc đã xác nhận sách đúng mô tả và hoàn tất đối soát.',
-    },
-  ]);
+  // Reports state (empty by default for fresh accounts, persisted per user email)
+  const reportsStorageKey = `unidoc_reports_${(profile.email || 'guest').toLowerCase()}`;
+  const [reports, setReports] = useState<ReportItem[]>(() => {
+    try {
+      const saved = localStorage.getItem(reportsStorageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return Array.isArray(parsed) ? parsed : [];
+      }
+    } catch {}
+    return [];
+  });
   const [newReportTitle, setNewReportTitle] = useState('');
   const [newReportDetail, setNewReportDetail] = useState('');
+
+  // Dynamic Reputation & Rank calculation (only earned through real buying or selling activity)
+  const activityPoints = orders.length + postedBooksCount;
+  const hasReputation = activityPoints > 0;
+  const currentRankBadge = getRankBadgeForCount(activityPoints);
+  const currentRankTier = currentRankBadge?.tier ?? 0;
+  const reputationScore = hasReputation
+    ? Math.min(5.0, Number((4.0 + activityPoints * 0.3).toFixed(1)))
+    : 0;
+  const reputationPercent = hasReputation ? Math.round((reputationScore / 5) * 100) : 0;
 
   // Account settings toggles
   const [notifyOrderUpdates, setNotifyOrderUpdates] = useState(true);
@@ -238,6 +272,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   const persistProfile = (next: UserProfile) => {
     setProfile(next);
+    if (onAvatarUpdated) {
+      onAvatarUpdated(next.avatar);
+    }
+    if (onUsernameUpdated) {
+      onUsernameUpdated(next.username || next.name);
+    }
     try {
       localStorage.setItem('unidoc_user_profile', JSON.stringify(next));
     } catch {}
@@ -314,13 +354,45 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     reader.readAsDataURL(file);
   };
 
-  const handleSaveProfile = (e: React.FormEvent) => {
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanedUsername = (draftProfile.username ?? draftProfile.name).trim() || 'sinhvien_unidoc';
+    const cleanedUsername = (draftProfile.username ?? draftProfile.name).trim();
+
+    if (cleanedUsername.length < 3) {
+      setProfileEditError('Username cần tối thiểu 3 ký tự.');
+      return;
+    }
+    if (/\s/.test(cleanedUsername)) {
+      setProfileEditError('Username không được chứa khoảng trắng.');
+      return;
+    }
+    if (isUsernameTakenLocally(cleanedUsername, profile.email)) {
+      setProfileEditError('Tên Username này đã có người sử dụng. Vui lòng chọn Username khác.');
+      return;
+    }
+
+    try {
+      const serverRes = await fetch('/api/auth/update-username', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: profile.email, username: cleanedUsername }),
+      });
+      if (serverRes.status === 409) {
+        const err = await serverRes.json().catch(() => ({}));
+        setProfileEditError(
+          err.error || 'Tên Username này đã có người sử dụng. Vui lòng chọn Username khác.'
+        );
+        return;
+      }
+    } catch {}
+
+    setProfileEditError(null);
+    updateAccountUsernameLocally(profile.email, cleanedUsername);
+
     const updated: UserProfile = {
       name: cleanedUsername,
       username: cleanedUsername,
-      email: draftProfile.email.trim() || 'minhanh@edu.vn',
+      email: profile.email,
       university: draftProfile.university.trim() || 'ĐH Kinh tế TP.HCM',
       avatar: draftProfile.avatar || profile.avatar,
     };
@@ -332,17 +404,23 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const handleSubmitReport = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newReportTitle.trim()) return;
-    setReports((prev) => [
-      {
-        id: `rep_${Date.now()}`,
-        title: newReportTitle.trim(),
-        target: 'Tài khoản / Đơn hàng UniDoc',
-        status: 'reviewing',
-        date: 'Vừa gửi',
-        detail: newReportDetail.trim() || 'Đang chờ đội ngũ hỗ trợ sinh viên UniDoc xem xét.',
-      },
-      ...prev,
-    ]);
+    setReports((prev) => {
+      const next = [
+        {
+          id: `rep_${Date.now()}`,
+          title: newReportTitle.trim(),
+          target: 'Tài khoản / Đơn hàng UniDoc',
+          status: 'reviewing' as const,
+          date: 'Vừa gửi',
+          detail: newReportDetail.trim() || 'Đang chờ đội ngũ hỗ trợ sinh viên UniDoc xem xét.',
+        },
+        ...prev,
+      ];
+      try {
+        localStorage.setItem(reportsStorageKey, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
     setNewReportTitle('');
     setNewReportDetail('');
   };
@@ -457,20 +535,35 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             {/* Order filter tabs */}
             <div className="flex items-center gap-2 overflow-x-auto pb-1">
               {[
-                { id: 'all', label: `Tất cả (${orders.length})` },
+                {
+                  id: 'all',
+                  label: orders.length > 0 ? `Tất cả (${orders.length})` : 'Tất cả',
+                },
                 {
                   id: 'pending_confirmation',
-                  label: `Chờ xác nhận (${orders.filter((o) => o.status === 'pending_confirmation').length})`,
+                  label: (() => {
+                    const c = orders.filter((o) => o.status === 'pending_confirmation').length;
+                    return c > 0 ? `Chờ xác nhận (${c})` : 'Chờ xác nhận';
+                  })(),
                 },
                 {
                   id: 'preparing',
-                  label: `Chờ giao (${orders.filter((o) => o.status === 'preparing').length})`,
+                  label: (() => {
+                    const c = orders.filter((o) => o.status === 'preparing').length;
+                    return c > 0 ? `Chờ giao (${c})` : 'Chờ giao';
+                  })(),
                 },
                 {
                   id: 'completed',
-                  label: `Đã giao (${orders.filter((o) => o.status === 'completed').length})`,
+                  label: (() => {
+                    const c = orders.filter((o) => o.status === 'completed').length;
+                    return c > 0 ? `Đã giao (${c})` : 'Đã giao';
+                  })(),
                 },
-                { id: 'viewed', label: `Đã xem (${viewedBooks.length})` },
+                {
+                  id: 'viewed',
+                  label: viewedBooks.length > 0 ? `Đã xem (${viewedBooks.length})` : 'Đã xem',
+                },
               ].map((t) => (
                 <button
                   key={t.id}
@@ -488,45 +581,51 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
 
             {orderTab === 'viewed' ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {viewedBooks.map((b) => (
-                  <div
-                    key={b.id}
-                    onClick={() => onSelectBook(b)}
-                    className="p-3 rounded-2xl border border-[#b9e7ff] dark:border-zinc-800 bg-[#edf8fe]/40 dark:bg-zinc-900 flex items-center justify-between gap-3 cursor-pointer hover:border-[#4086ee]"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <BookCoverGraphic
-                        book={b}
-                        compact
-                        className="w-14 h-18 rounded-xl object-cover shrink-0 border border-[#b9e7ff] dark:border-zinc-700"
-                      />
-                      <div className="min-w-0">
-                        <h4 className="text-xs font-bold text-[#0860c9] dark:text-white line-clamp-2">
-                          {b.title}
-                        </h4>
-                        <div className="text-sm font-black text-[#4086ee] dark:text-sky-400 mt-1 tabular-nums">
-                          {formatVND(b.price)}
+              viewedBooks.length === 0 ? (
+                <div className="py-8 text-center text-sm text-[#5b728f] dark:text-zinc-400">
+                  Bạn chưa xem tài liệu nào.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {viewedBooks.map((b) => (
+                    <div
+                      key={b.id}
+                      onClick={() => onSelectBook(b)}
+                      className="p-3 rounded-2xl border border-[#b9e7ff] dark:border-zinc-800 bg-[#edf8fe]/40 dark:bg-zinc-900 flex items-center justify-between gap-3 cursor-pointer hover:border-[#4086ee]"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <BookCoverGraphic
+                          book={b}
+                          compact
+                          className="w-14 h-18 rounded-xl object-cover shrink-0 border border-[#b9e7ff] dark:border-zinc-700"
+                        />
+                        <div className="min-w-0">
+                          <h4 className="text-xs font-bold text-[#0860c9] dark:text-white line-clamp-2">
+                            {b.title}
+                          </h4>
+                          <div className="text-sm font-black text-[#4086ee] dark:text-sky-400 mt-1 tabular-nums">
+                            {formatVND(b.price)}
+                          </div>
                         </div>
                       </div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onAddToCart(b);
+                        }}
+                        className="p-2.5 rounded-xl bg-[#4086ee] hover:bg-[#0860c9] text-white shrink-0 cursor-pointer"
+                        aria-label="Thêm vào giỏ"
+                      >
+                        <ShoppingCart className="w-4 h-4" />
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onAddToCart(b);
-                      }}
-                      className="p-2.5 rounded-xl bg-[#4086ee] hover:bg-[#0860c9] text-white shrink-0 cursor-pointer"
-                      aria-label="Thêm vào giỏ"
-                    >
-                      <ShoppingCart className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )
             ) : filteredOrders.length === 0 ? (
               <div className="py-8 text-center text-sm text-[#5b728f] dark:text-zinc-400">
-                Không có đơn hàng nào trong mục này.
+                Chưa có đơn hàng nào trong mục này.
               </div>
             ) : (
               <div className="space-y-3">
@@ -587,10 +686,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-black text-[#0860c9] dark:text-white">
-                  Đánh giá của tôi ({anonymousReviews.length})
+                  {anonymousReviews.length > 0
+                    ? `Đánh giá của tôi (${anonymousReviews.length})`
+                    : 'Đánh giá của tôi'}
                 </h2>
                 <p className="text-xs text-[#5b728f] dark:text-zinc-400">
-                  Các nhận xét 5 sao và đánh giá ẩn danh bạn đã gửi cho người bán.
+                  Các nhận xét bạn đã gửi cho sách & người bán trên UniDoc.
                 </p>
               </div>
               <button
@@ -603,47 +704,60 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               </button>
             </div>
 
-            <div className="space-y-3">
-              {anonymousReviews.map((rev) => (
-                <div
-                  key={rev.id}
-                  className="p-4 rounded-2xl border border-[#b9e7ff] dark:border-zinc-800 bg-[#edf8fe]/40 dark:bg-zinc-900 space-y-2"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-xs font-bold text-[#0860c9] dark:text-white">
-                      <EyeOff className="w-4 h-4 text-[#4086ee]" />
-                      <span>{rev.anonymousAlias || 'Sinh viên ẩn danh'}</span>
+            {anonymousReviews.length === 0 ? (
+              <div className="py-8 text-center text-sm text-[#5b728f] dark:text-zinc-400">
+                Bạn chưa gửi đánh giá nào.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {anonymousReviews.map((rev) => (
+                  <div
+                    key={rev.id}
+                    className="p-4 rounded-2xl border border-[#b9e7ff] dark:border-zinc-800 bg-[#edf8fe]/40 dark:bg-zinc-900 space-y-2"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-xs font-bold text-[#0860c9] dark:text-white">
+                        <EyeOff className="w-4 h-4 text-[#4086ee]" />
+                        <span>{rev.anonymousAlias || rev.reviewerName || 'Sinh viên ẩn danh'}</span>
+                      </div>
+                      <div className="flex items-center gap-0.5">
+                        {[1, 2, 3, 4, 5].map((s) => (
+                          <Star
+                            key={s}
+                            className={`w-3.5 h-3.5 ${
+                              s <= rev.rating
+                                ? 'fill-amber-400 text-amber-400'
+                                : 'text-slate-300 dark:text-zinc-700'
+                            }`}
+                          />
+                        ))}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-0.5">
-                      {[1, 2, 3, 4, 5].map((s) => (
-                        <Star
-                          key={s}
-                          className={`w-3.5 h-3.5 ${
-                            s <= rev.rating
-                              ? 'fill-amber-400 text-amber-400'
-                              : 'text-slate-300 dark:text-zinc-700'
-                          }`}
-                        />
-                      ))}
+                    <div className="text-xs font-semibold text-[#5b728f] dark:text-zinc-400">
+                      {rev.bookTitle} · {rev.createdAt}
                     </div>
+                    <p className="text-xs sm:text-sm text-slate-700 dark:text-zinc-200 leading-relaxed">
+                      “{rev.comment}”
+                    </p>
                   </div>
-                  <div className="text-xs font-semibold text-[#5b728f] dark:text-zinc-400">
-                    {rev.bookTitle} · {rev.createdAt}
-                  </div>
-                  <p className="text-xs sm:text-sm text-slate-700 dark:text-zinc-200 leading-relaxed">
-                    “{rev.comment}”
-                  </p>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </section>
         ) : activeSubView === 'reports' ? (
           <section className="bg-white dark:bg-zinc-950 rounded-[18px] border border-[#b9e7ff] dark:border-zinc-800 shadow-[0_6px_22px_rgba(64,134,238,0.08)] p-4 sm:p-6 space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-black text-[#0860c9] dark:text-white">
-                  Báo cáo của tôi
-                </h2>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-lg font-black text-[#0860c9] dark:text-white">
+                    Báo cáo của tôi
+                  </h2>
+                  {currentRankTier >= 3 && (
+                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                      ⚡ Fast-track Support (Hạng {currentRankTier})
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-[#5b728f] dark:text-zinc-400">
                   Theo dõi yêu cầu kiểm tra sách hoặc báo cáo vi phạm tài liệu.
                 </p>
@@ -686,25 +800,31 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </form>
 
             <div className="space-y-2.5">
-              {reports.map((rep) => (
-                <div
-                  key={rep.id}
-                  className="p-3.5 rounded-2xl border border-[#b9e7ff] dark:border-zinc-800 bg-white dark:bg-zinc-900 space-y-1"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-[#0860c9] dark:text-white">
-                      {rep.title}
-                    </span>
-                    <span className="text-[11px] font-bold text-[#4086ee] dark:text-sky-400 shrink-0">
-                      {rep.status === 'resolved' ? 'Đã xử lý' : 'Đang xem xét'}
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-[#5b728f] dark:text-zinc-400">
-                    {rep.target} · {rep.date}
-                  </div>
-                  <p className="text-xs text-slate-600 dark:text-zinc-300">{rep.detail}</p>
+              {reports.length === 0 ? (
+                <div className="py-6 text-center text-xs sm:text-sm text-[#5b728f] dark:text-zinc-400">
+                  Chưa có báo cáo nào được gửi.
                 </div>
-              ))}
+              ) : (
+                reports.map((rep) => (
+                  <div
+                    key={rep.id}
+                    className="p-3.5 rounded-2xl border border-[#b9e7ff] dark:border-zinc-800 bg-white dark:bg-zinc-900 space-y-1"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-[#0860c9] dark:text-white">
+                        {rep.title}
+                      </span>
+                      <span className="text-[11px] font-bold text-[#4086ee] dark:text-sky-400 shrink-0">
+                        {rep.status === 'resolved' ? 'Đã xử lý' : 'Đang xem xét'}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-[#5b728f] dark:text-zinc-400">
+                      {rep.target} · {rep.date}
+                    </div>
+                    <p className="text-xs text-slate-600 dark:text-zinc-300">{rep.detail}</p>
+                  </div>
+                ))
+              )}
             </div>
           </section>
         ) : activeSubView === 'help' ? (
@@ -919,19 +1039,15 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       aria-label="Đổi ảnh đại diện từ máy"
                       className="relative group rounded-full cursor-pointer focus:outline-hidden focus-visible:ring-2 focus-visible:ring-[#4086ee]"
                     >
-                      {avatarError ? (
-                        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-[#4086ee] text-white flex items-center justify-center text-xl font-black border-2 border-[#b9e7ff]">
-                          MA
-                        </div>
-                      ) : (
-                        <img
-                          src={profile.avatar}
-                          alt={profile.name}
-                          referrerPolicy="no-referrer"
-                          onError={() => setAvatarError(true)}
-                          className="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover border-2 border-[#b9e7ff] dark:border-zinc-700 shadow-xs group-hover:brightness-90 transition-all"
-                        />
-                      )}
+                      <RankAvatar
+                        src={profile.avatar}
+                        alt={profile.name}
+                        tier={currentRankTier}
+                        size="lg"
+                        hasError={avatarError}
+                        onError={() => setAvatarError(true)}
+                        fallbackText={(profile.username || profile.name || 'SV').slice(0, 2).toUpperCase()}
+                      />
                       <span className="absolute -bottom-0.5 -right-0.5 w-7 h-7 rounded-full bg-[#4086ee] hover:bg-[#0860c9] text-white border-2 border-white dark:border-zinc-950 flex items-center justify-center shadow-sm transition-transform group-hover:scale-105">
                         <Camera className="w-3.5 h-3.5" />
                       </span>
@@ -939,9 +1055,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   </div>
 
                   <div className="min-w-0 space-y-0.5">
-                    <h2 className="text-lg sm:text-xl font-black text-[#0860c9] dark:text-white truncate">
-                      {profile.username || profile.name}
-                    </h2>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h2 className="text-lg sm:text-xl font-black text-[#0860c9] dark:text-white truncate">
+                        {profile.username || profile.name}
+                      </h2>
+                      {currentRankBadge && (
+                        <HumorousBadge badge={currentRankBadge} size="xs" onClick={onOpenTitlesGuide} />
+                      )}
+                    </div>
                     <div className="text-xs sm:text-sm text-[#5b728f] dark:text-zinc-400 truncate">
                       {profile.email}
                     </div>
@@ -956,6 +1077,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   type="button"
                   onClick={() => {
                     setAvatarUploadError(null);
+                    setProfileEditError(null);
                     setDraftProfile(profile);
                     setIsEditingProfile(true);
                   }}
@@ -980,39 +1102,61 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     Điểm uy tín
                   </h2>
                   <p className="text-xs text-[#5b728f] dark:text-zinc-400">
-                    Đánh giá từ cộng đồng sinh viên UniDoc
+                    {hasReputation
+                      ? 'Đánh giá từ cộng đồng sinh viên UniDoc'
+                      : 'Mua hàng hoặc đăng bán sách ngay để tích điểm uy tín'}
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-0.5" aria-label="4.8 trên 5 sao">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <Star
-                        key={star}
-                        className={`w-4 h-4 ${
-                          star <= 4
-                            ? 'fill-[#4086ee] text-[#4086ee]'
-                            : 'fill-[#b9e7ff] text-[#4086ee]'
-                        }`}
-                      />
-                    ))}
+                {hasReputation ? (
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-0.5" aria-label={`${reputationScore} trên 5 sao`}>
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <Star
+                          key={star}
+                          className={`w-4 h-4 ${
+                            star <= Math.round(reputationScore)
+                              ? 'fill-[#4086ee] text-[#4086ee]'
+                              : 'fill-[#b9e7ff] text-[#4086ee]'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                    <span className="text-lg font-black text-[#0860c9] dark:text-white tabular-nums">
+                      {reputationScore}/5
+                    </span>
                   </div>
-                  <span className="text-lg font-black text-[#0860c9] dark:text-white tabular-nums">
-                    4.8/5
-                  </span>
-                </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-0.5" aria-label="Chưa có điểm uy tín">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <Star
+                          key={star}
+                          className="w-4 h-4 text-slate-300 dark:text-zinc-700"
+                        />
+                      ))}
+                    </div>
+                    <span className="text-xs sm:text-sm font-bold text-[#5b728f] dark:text-zinc-400">
+                      Chưa có
+                    </span>
+                  </div>
+                )}
               </div>
 
-              {/* Thanh tiến độ uy tín gọn gàng */}
+              {/* Thanh tiến độ uy tín */}
               <div className="space-y-1.5">
                 <div className="w-full h-2.5 rounded-full bg-[#edf8fe] dark:bg-zinc-800 overflow-hidden">
                   <div
-                    className="h-full rounded-full bg-[#4086ee]"
-                    style={{ width: '96%' }}
+                    className="h-full rounded-full bg-[#4086ee] transition-all duration-300"
+                    style={{ width: `${reputationPercent}%` }}
                   />
                 </div>
                 <div className="flex items-center justify-between text-[11px] font-medium text-[#5b728f] dark:text-zinc-400">
-                  <span>Mức độ tin cậy: 96%</span>
+                  <span>
+                    {hasReputation
+                      ? `Mức độ tin cậy: ${reputationPercent}%`
+                      : 'Chưa có điểm uy tín'}
+                  </span>
                   <button
                     type="button"
                     onClick={onOpenTitlesGuide}
@@ -1023,23 +1167,55 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 </div>
               </div>
 
-              {/* Các huy hiệu nhỏ tinh tế cùng tông xanh dương (không dùng quá nhiều màu) */}
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#edf8fe] dark:bg-zinc-900 border border-[#b9e7ff] dark:border-zinc-800 text-xs font-bold text-[#0860c9] dark:text-sky-300">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-[#4086ee]" />
-                  <span>Người mua tích cực</span>
-                </span>
-
-                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#edf8fe] dark:bg-zinc-900 border border-[#b9e7ff] dark:border-zinc-800 text-xs font-bold text-[#0860c9] dark:text-sky-300">
-                  <Award className="w-3.5 h-3.5 text-[#4086ee]" />
-                  <span>Người bán uy tín</span>
-                </span>
-
-                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#edf8fe] dark:bg-zinc-900 border border-[#b9e7ff] dark:border-zinc-800 text-xs font-bold text-[#0860c9] dark:text-sky-300">
-                  <Star className="w-3.5 h-3.5 text-[#4086ee]" />
-                  <span>Đóng góp tài liệu</span>
-                </span>
-              </div>
+              {hasReputation ? (
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  {currentRankBadge && (
+                    <HumorousBadge badge={currentRankBadge} size="sm" onClick={onOpenTitlesGuide} />
+                  )}
+                  {currentRankBadge?.avatarFrameLabel && (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#edf8fe] dark:bg-zinc-900 border border-[#b9e7ff] dark:border-zinc-800 text-xs font-bold text-[#0860c9] dark:text-sky-300">
+                      <Award className="w-3.5 h-3.5 text-[#4086ee]" />
+                      <span>{currentRankBadge.avatarFrameLabel}</span>
+                    </span>
+                  )}
+                  {orders.length > 0 && (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#edf8fe] dark:bg-zinc-900 border border-[#b9e7ff] dark:border-zinc-800 text-xs font-bold text-[#0860c9] dark:text-sky-300">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-[#4086ee]" />
+                      <span>Người mua tích cực</span>
+                    </span>
+                  )}
+                  {postedBooksCount > 0 && (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#edf8fe] dark:bg-zinc-900 border border-[#b9e7ff] dark:border-zinc-800 text-xs font-bold text-[#0860c9] dark:text-sky-300">
+                      <Star className="w-3.5 h-3.5 text-[#4086ee]" />
+                      <span>Đóng góp tài liệu</span>
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div className="p-3.5 rounded-2xl bg-[#edf8fe]/80 dark:bg-zinc-900 border border-[#b9e7ff] dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <p className="text-xs text-[#0860c9] dark:text-zinc-300 font-medium leading-relaxed">
+                    Tài khoản mới chưa có hoạt động. Hãy mua sách hoặc đăng bán giáo trình ngay để tích điểm uy tín đầu tiên!
+                  </p>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={onBackToHome}
+                      className="px-3 py-2 rounded-xl bg-white dark:bg-zinc-950 border border-[#b9e7ff] dark:border-zinc-700 text-[#0860c9] dark:text-sky-300 text-xs font-bold hover:bg-[#edf8fe] cursor-pointer"
+                    >
+                      Mua sách
+                    </button>
+                    {onOpenPostBook && (
+                      <button
+                        type="button"
+                        onClick={onOpenPostBook}
+                        className="px-3 py-2 rounded-xl bg-[#4086ee] hover:bg-[#0860c9] text-white text-xs font-bold cursor-pointer"
+                      >
+                        Đăng bán sách
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </section>
 
             {/* 4. DANH SÁCH 7 CHỨC NĂNG (Nền trắng, icon xanh dương bên trái, mũi tên bên phải, đường phân cách mảnh) */}
@@ -1060,7 +1236,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         Lịch sử mua hàng
                       </div>
                       <div className="text-xs text-[#5b728f] dark:text-zinc-400">
-                        {orders.length} đơn hàng đã đặt · Sách đã xem
+                        {orders.length > 0
+                          ? `${orders.length} đơn hàng đã đặt · Sách đã xem`
+                          : 'Chưa có hoạt động mua hàng'}
                       </div>
                     </div>
                   </div>
@@ -1082,7 +1260,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         Tài liệu đã đăng
                       </div>
                       <div className="text-xs text-[#5b728f] dark:text-zinc-400">
-                        Quản lý {postedBooksCount} sách & tài liệu đang chia sẻ
+                        {postedBooksCount > 0
+                          ? `Quản lý ${postedBooksCount} sách & tài liệu đang chia sẻ`
+                          : 'Chưa đăng tài liệu nào'}
                       </div>
                     </div>
                   </div>
@@ -1104,7 +1284,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         Đánh giá của tôi
                       </div>
                       <div className="text-xs text-[#5b728f] dark:text-zinc-400">
-                        {anonymousReviews.length} nhận xét 5 sao & đánh giá ẩn danh
+                        {anonymousReviews.length > 0
+                          ? `${anonymousReviews.length} nhận xét & đánh giá đã gửi`
+                          : 'Chưa có đánh giá nào'}
                       </div>
                     </div>
                   </div>
@@ -1126,7 +1308,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         Yêu thích
                       </div>
                       <div className="text-xs text-[#5b728f] dark:text-zinc-400">
-                        Đang lưu {favoritesCount} sách & tài liệu học tập
+                        {favoritesCount > 0
+                          ? `Đang lưu ${favoritesCount} sách & tài liệu học tập`
+                          : 'Chưa lưu tài liệu yêu thích nào'}
                       </div>
                     </div>
                   </div>
@@ -1148,7 +1332,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         Báo cáo của tôi
                       </div>
                       <div className="text-xs text-[#5b728f] dark:text-zinc-400">
-                        Theo dõi phản ánh chất lượng tài liệu ({reports.length})
+                        {reports.length > 0
+                          ? `Theo dõi phản ánh chất lượng tài liệu (${reports.length})`
+                          : 'Chưa có báo cáo nào'}
                       </div>
                     </div>
                   </div>
@@ -1245,6 +1431,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
 
             <form onSubmit={handleSaveProfile} className="space-y-3.5">
+              {profileEditError && (
+                <div className="px-3.5 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 text-xs font-semibold text-amber-800 dark:text-amber-300">
+                  {profileEditError}
+                </div>
+              )}
               {/* Đổi ảnh đại diện từ máy */}
               <div className="flex items-center gap-4 p-3 rounded-2xl bg-[#edf8fe]/70 dark:bg-zinc-900 border border-[#b9e7ff] dark:border-zinc-800">
                 <img
@@ -1273,17 +1464,20 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       <Upload className="w-3.5 h-3.5" />
                       <span>Tải ảnh từ máy</span>
                     </button>
-                    {draftProfile.avatar !== DEFAULT_AVATAR && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setDraftProfile((prev) => ({ ...prev, avatar: DEFAULT_AVATAR }))
-                        }
-                        className="px-2.5 py-1.5 rounded-xl bg-white dark:bg-zinc-950 border border-[#b9e7ff] dark:border-zinc-700 text-[#5b728f] dark:text-zinc-300 text-xs font-semibold hover:text-[#0860c9] cursor-pointer"
-                      >
-                        Khôi phục mặc định
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAvatarError(false);
+                        setDraftProfile((prev) => ({
+                          ...prev,
+                          avatar: getRandomAnimalAvatar(prev.avatar),
+                        }));
+                      }}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white dark:bg-zinc-950 border border-[#b9e7ff] dark:border-zinc-700 text-[#0860c9] dark:text-sky-300 text-xs font-semibold hover:bg-[#edf8fe] dark:hover:bg-zinc-900 cursor-pointer"
+                    >
+                      <Shuffle className="w-3.5 h-3.5" />
+                      <span>Đổi con vật ngẫu nhiên</span>
+                    </button>
                   </div>
                   {avatarUploadError && (
                     <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-400">
@@ -1300,13 +1494,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 <input
                   type="text"
                   value={draftProfile.username ?? draftProfile.name}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    if (profileEditError) setProfileEditError(null);
                     setDraftProfile({
                       ...draftProfile,
                       name: e.target.value,
                       username: e.target.value,
-                    })
-                  }
+                    });
+                  }}
                   placeholder="Nhập username của bạn"
                   className="w-full px-3.5 py-2.5 rounded-xl bg-[#edf8fe]/60 dark:bg-zinc-900 border border-[#b9e7ff] dark:border-zinc-700 text-sm text-[#0860c9] dark:text-white focus:outline-hidden focus:border-[#4086ee]"
                 />
@@ -1314,13 +1509,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-[#0860c9] dark:text-zinc-300 mb-1">
-                  Email sinh viên
+                  Email sinh viên (cố định theo tài khoản)
                 </label>
                 <input
                   type="email"
                   value={draftProfile.email}
-                  onChange={(e) => setDraftProfile({ ...draftProfile, email: e.target.value })}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#edf8fe]/60 dark:bg-zinc-900 border border-[#b9e7ff] dark:border-zinc-700 text-sm text-[#0860c9] dark:text-white focus:outline-hidden focus:border-[#4086ee]"
+                  readOnly
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-100 dark:bg-zinc-900/70 border border-[#b9e7ff] dark:border-zinc-800 text-sm text-[#5b728f] dark:text-zinc-400 cursor-not-allowed"
                 />
               </div>
 

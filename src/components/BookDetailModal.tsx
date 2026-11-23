@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Book, BookReview, HumorousBadgeInfo } from '../types';
 import { HumorousBadge } from './HumorousBadge';
 import { BookCoverGraphic } from './BookCoverGraphic';
+import { RankAvatar } from './RankAvatar';
 import {
   X,
   Star,
@@ -335,10 +336,12 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({
           <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-slate-900 to-indigo-950 text-white border border-slate-800 shadow-lg">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <img
+                <RankAvatar
                   src={book.seller.avatar}
                   alt={book.seller.name}
-                  className="w-14 h-14 rounded-2xl object-cover border-2 border-sky-400 shrink-0 shadow-md"
+                  tier={book.seller.sellerBadge.tier}
+                  size="md"
+                  fallbackText={book.seller.name.slice(0, 2).toUpperCase()}
                 />
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">

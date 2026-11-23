@@ -13,8 +13,16 @@ import {
   Trash2,
   AlertCircle,
 } from 'lucide-react';
-import { HUMOROUS_SELLER_BADGES } from '../data/mockData';
+import { HUMOROUS_SELLER_BADGES, HUMOROUS_BUYER_BADGES } from '../data/mockData';
+import { getRankBadgeForCount } from './RankAvatar';
 import { processImageFiles } from '../utils/imageUpload';
+
+interface PostBookUser {
+  id: string;
+  name: string;
+  avatar: string;
+  university?: string;
+}
 
 interface PostBookModalProps {
   isOpen: boolean;
@@ -22,6 +30,7 @@ interface PostBookModalProps {
   universities: University[];
   onAddBook: (newBook: Book) => void;
   currentSellerSalesCount?: number;
+  currentUser?: PostBookUser;
 }
 
 export const PostBookModal: React.FC<PostBookModalProps> = ({
@@ -29,7 +38,8 @@ export const PostBookModal: React.FC<PostBookModalProps> = ({
   onClose,
   universities,
   onAddBook,
-  currentSellerSalesCount = 5,
+  currentSellerSalesCount = 0,
+  currentUser,
 }) => {
   const [step, setStep] = useState(1);
   const [stepError, setStepError] = useState<string | null>(null);
@@ -200,6 +210,10 @@ export const PostBookModal: React.FC<PostBookModalProps> = ({
 
     if (!selectedUni) return;
 
+    const nextSalesCount = currentSellerSalesCount + 1;
+    const unlockedSellerBadge =
+      getRankBadgeForCount(nextSalesCount) || HUMOROUS_SELLER_BADGES[0];
+
     const newBook: Book = {
       id: `book_${Date.now()}`,
       title: title.trim(),
@@ -224,32 +238,21 @@ export const PostBookModal: React.FC<PostBookModalProps> = ({
       images: images,
       videoUrl: includeVideo ? videoUrl : undefined,
       seller: {
-        id: 'user_current',
-        name: 'Trần Văn Nam',
-        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=160&auto=format&fit=crop&q=80',
-        university: selectedUni.name,
+        id: currentUser?.id || 'user_current',
+        name: currentUser?.name || 'Sinh viên UniDoc',
+        avatar:
+          currentUser?.avatar ||
+          'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=160&auto=format&fit=crop&q=80',
+        university: currentUser?.university || selectedUni.name,
         major: major.trim() || 'Đại cương',
         isVerifiedStudent: true,
-        studentIdMasked: '2214***',
-        sellerBadge: HUMOROUS_SELLER_BADGES[1], // Chiến Thần Pass Sách K70
-        buyerBadge: {
-          id: 'buyer_tier_2',
-          name: 'Thần Đồng Ôn Thi Giờ Chót',
-          category: 'buyer',
-          tier: 2,
-          minThreshold: 4,
-          icon: '⚡',
-          badgeColor: 'border-amber-500 bg-amber-50 text-amber-900',
-          textColor: 'text-amber-900',
-          bgGradient: 'from-amber-400 to-yellow-600',
-          description: 'Đã mua 4-10 cuốn',
-          funnyQuote: 'Trước ngày thi 48 giờ mới hốt hoảng mở UniDoc tìm sách cứu mạng!',
-          perk: 'Ưu tiên ship hỏa tốc',
-        },
-        salesCount: currentSellerSalesCount + 1,
-        buyCount: 6,
+        studentIdMasked: 'SV***',
+        sellerBadge: unlockedSellerBadge,
+        buyerBadge: HUMOROUS_BUYER_BADGES[0],
+        salesCount: nextSalesCount,
+        buyCount: 0,
         rating: 5.0,
-        reviewCount: 4,
+        reviewCount: 0,
         responseRate: '100%',
         responseTime: 'Trong 5 phút',
       },
@@ -263,8 +266,8 @@ export const PostBookModal: React.FC<PostBookModalProps> = ({
       stock: 1,
       status: 'active',
       createdAt: 'Vừa xong',
-      likesCount: 1,
-      viewCount: 12,
+      likesCount: 0,
+      viewCount: 0,
     };
 
     onAddBook(newBook);
@@ -315,16 +318,33 @@ export const PostBookModal: React.FC<PostBookModalProps> = ({
           </button>
         </div>
 
-        {/* Humorous Title Progress Incentive Banner */}
+        {/* Title Progress Incentive Banner */}
         <div className="px-6 py-2.5 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-zinc-900 dark:to-zinc-900 border-b border-amber-200/60 dark:border-zinc-800 flex items-center justify-between text-xs">
           <div className="flex items-center gap-2 text-amber-900 dark:text-amber-300 font-semibold">
-            <Award className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+            <Award className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
             <span>
-              Pass thêm cuốn này để thăng hạng danh hiệu: <b>"Chiến Thần Pass Sách K70"</b> ⚔️
+              {currentSellerSalesCount === 0 ? (
+                <>
+                  Đăng bán cuốn sách đầu tiên ngay để tích <b>Điểm uy tín</b> và mở khóa{' '}
+                  <b>Hạng 1 – Sứ Giả Sách Mới</b> 🥉
+                </>
+              ) : currentSellerSalesCount >= 31 ? (
+                <>
+                  Đặc quyền Hạng 4+: Tự động duyệt tin đăng & đẩy lên mục <b>"Tài liệu nổi bật"</b> 24h đầu 💎
+                </>
+              ) : currentSellerSalesCount >= 21 ? (
+                <>
+                  Đặc quyền Hạng 3: Tự động duyệt tin đăng ngay lập tức & mở khóa ghim bài 48h 🥇
+                </>
+              ) : (
+                <>
+                  Đăng thêm sách để tích Điểm uy tín & mở khóa khung Avatar cùng đặc quyền UniDoc ✨
+                </>
+              )}
             </span>
           </div>
-          <span className="text-[11px] font-bold text-orange-600 dark:text-amber-400 hidden sm:inline">
-            +1 Điểm Uy Tín
+          <span className="text-[11px] font-bold text-orange-600 dark:text-amber-400 hidden sm:inline shrink-0">
+            Tích Điểm Uy Tín
           </span>
         </div>
 

@@ -10,6 +10,7 @@ interface CartDrawerProps {
   onRemoveItem: (bookId: string) => void;
   onUpdateQuantity: (bookId: string, quantity: number) => void;
   onCheckout: () => void;
+  userRankTier?: number;
 }
 
 export const CartDrawer: React.FC<CartDrawerProps> = ({
@@ -19,10 +20,11 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   onRemoveItem,
   onUpdateQuantity,
   onCheckout,
+  userRankTier = 0,
 }) => {
   const [promoCode, setPromoCode] = useState('');
   const [discount, setDiscount] = useState(0);
-  const [promoApplied, setPromoApplied] = useState(false);
+  const [promoMessage, setPromoMessage] = useState<{ text: string; isError: boolean } | null>(null);
 
   if (!isOpen) return null;
 
@@ -37,11 +39,28 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   const total = Math.max(0, subtotal - discount);
 
   const handleApplyPromo = () => {
-    if (promoCode.trim().toUpperCase() === 'TANSV20K') {
+    const code = promoCode.trim().toUpperCase();
+    if (code === 'TANSV20K') {
       setDiscount(20000);
-      setPromoApplied(true);
+      setPromoMessage({ text: 'Đã áp dụng mã giảm giá sinh viên: -20.000đ', isError: false });
+    } else if (code === 'HUYENTHOAI10K' || code === 'HANG5_10K') {
+      if (userRankTier >= 5) {
+        setDiscount(10000);
+        setPromoMessage({
+          text: 'Đã áp dụng Voucher Hạng 5 – Huyền Thoại Tàng Kinh Các: -10.000đ',
+          isError: false,
+        });
+      } else {
+        setPromoMessage({
+          text: 'Voucher này chỉ dành cho Hạng 5 – Huyền Thoại Tàng Kinh Các.',
+          isError: true,
+        });
+      }
     } else {
-      alert('Mã giảm giá không hợp lệ. Hãy thử: TANSV20K');
+      setPromoMessage({
+        text: 'Mã giảm giá không hợp lệ. Hãy thử: TANSV20K',
+        isError: true,
+      });
     }
   };
 
@@ -131,6 +150,24 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           {/* Footer & Checkout */}
           {items.length > 0 && (
             <div className="p-4 sm:p-5 border-t border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900 space-y-3">
+              {userRankTier >= 5 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPromoCode('HUYENTHOAI10K');
+                    setDiscount(10000);
+                    setPromoMessage({
+                      text: 'Đã áp dụng Voucher Hạng 5 – Huyền Thoại Tàng Kinh Các: -10.000đ',
+                      isError: false,
+                    });
+                  }}
+                  className="w-full py-2 px-3 rounded-xl bg-amber-100 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 text-xs font-bold flex items-center justify-between cursor-pointer hover:bg-amber-200/70 transition-colors"
+                >
+                  <span>👑 Voucher Hạng 5: Giảm 10.000đ</span>
+                  <span className="underline">Áp dụng ngay</span>
+                </button>
+              )}
+
               {/* Promo code */}
               <div className="flex gap-2">
                 <div className="relative flex-1">
@@ -152,10 +189,16 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 </button>
               </div>
 
-              {promoApplied && (
-                <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
-                  <Check className="w-3 h-3" />
-                  Đã áp dụng mã giảm giá sinh viên: -20.000đ
+              {promoMessage && (
+                <div
+                  className={`text-[11px] font-bold flex items-center gap-1 ${
+                    promoMessage.isError
+                      ? 'text-rose-600 dark:text-rose-400'
+                      : 'text-emerald-600 dark:text-emerald-400'
+                  }`}
+                >
+                  {!promoMessage.isError && <Check className="w-3 h-3 shrink-0" />}
+                  <span>{promoMessage.text}</span>
                 </div>
               )}
 

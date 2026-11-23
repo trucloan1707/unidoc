@@ -67,7 +67,11 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
                 Thông Báo Hoạt Động
               </h3>
               <p className="text-xs text-slate-500 dark:text-zinc-400">
-                {unreadCount > 0 ? `${unreadCount} thông báo chưa đọc` : 'Bạn đã đọc hết thông báo'}
+                {notifications.length === 0
+                  ? 'Chưa có thông báo hoạt động nào'
+                  : unreadCount > 0
+                  ? `${unreadCount} thông báo chưa đọc`
+                  : 'Bạn đã đọc hết thông báo'}
               </p>
             </div>
           </div>
@@ -101,7 +105,7 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
                 : 'bg-slate-100 dark:bg-zinc-900 text-slate-600 dark:text-white hover:bg-slate-200 dark:hover:bg-zinc-800'
             }`}
           >
-            Tất cả ({notifications.length})
+            {notifications.length > 0 ? `Tất cả (${notifications.length})` : 'Tất cả'}
           </button>
           <button
             onClick={() => setFilter('order')}

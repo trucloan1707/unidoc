@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UniDocLogo } from './UniDocLogo';
+import { RankAvatar } from './RankAvatar';
 import {
   Search,
   ShoppingCart,
@@ -53,6 +54,9 @@ interface NavbarProps {
   onOpenRegister?: () => void;
   isLoggedIn?: boolean;
   isAdmin?: boolean;
+  userAvatar?: string;
+  userDisplayName?: string;
+  userRankTier?: number;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -74,7 +78,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenAdminPanel,
   currentNavTab,
   onNavigateTab,
-  unreadMessagesCount = 2,
+  unreadMessagesCount = 0,
   onOpenNotifications,
   unreadNotificationsCount = 0,
   favoritesCount = 0,
@@ -84,6 +88,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenRegister,
   isLoggedIn = false,
   isAdmin = false,
+  userAvatar,
+  userDisplayName,
+  userRankTier = 0,
 }) => {
   // Searchable university popover state
   const [isUniOpen, setIsUniOpen] = useState(false);
@@ -212,8 +219,9 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       {/* Main navigation row */}
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2.5">
-        <div className="flex items-center justify-between gap-2.5 md:gap-4">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 space-y-2.5">
+        {/* Row 1: Brand Logo + Action Utilities (Cart, Dark/Light toggle beside Cart, Favorites, Notifications, Chat, Account) */}
+        <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
           {/* Brand Logo */}
           <button
             onClick={() => {
@@ -227,347 +235,72 @@ export const Navbar: React.FC<NavbarProps> = ({
             <UniDocLogo size="md" variant={darkMode ? 'dark' : 'light'} />
           </button>
 
-          {/* ADVANCED SEARCH BAR + GIỎ HÀNG KẾ BÊN THANH TÌM KIẾM */}
-          <div className="flex-1 max-w-3xl flex items-center gap-2 sm:gap-3">
-            {/* Search container with interactive searchable dropdowns */}
-            <div className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center bg-slate-100 dark:bg-zinc-900 focus-within:bg-white dark:focus-within:bg-zinc-900 border border-slate-200 dark:border-zinc-700 focus-within:border-sky-500 rounded-2xl p-1 gap-1 focus-within:ring-2 focus-within:ring-sky-500/20 transition-all shadow-xs relative">
-              {/* 1. TÌM KIẾM & LỌC THEO TRƯỜNG ĐẠI HỌC (Interactive Searchable Combobox) */}
-              <div className="relative shrink-0" ref={uniRef}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsUniOpen(!isUniOpen);
-                    setIsMajorOpen(false);
-                  }}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white dark:bg-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-800 sm:bg-transparent sm:dark:bg-transparent rounded-xl border sm:border-0 border-slate-200 dark:border-zinc-700 text-xs text-left cursor-pointer transition-colors w-full sm:w-auto"
-                >
-                  <Building2 className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
-                  <span className="text-[11px] font-bold text-slate-400 dark:text-zinc-300 hidden xl:inline">Trường:</span>
-                  <span className="font-bold text-slate-800 dark:text-white truncate max-w-[125px]">
-                    {selectedUni ? selectedUni.shortName : 'Tất cả trường'}
-                  </span>
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-300 shrink-0 ml-0.5" />
-                </button>
-
-                {/* University Searchable Dropdown Popover */}
-                {isUniOpen && (
-                  <div className="absolute left-0 top-full mt-2 w-72 sm:w-80 bg-white dark:bg-zinc-950 rounded-2xl shadow-2xl border border-slate-200 dark:border-zinc-800 p-2.5 z-50 animate-in fade-in zoom-in-95">
-                    <div className="relative mb-2">
-                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-                      <input
-                        type="text"
-                        autoFocus
-                        placeholder="Tìm tên trường (ví dụ Bách Khoa, UEH, Y Dược...)"
-                        value={uniSearch}
-                        onChange={(e) => setUniSearch(e.target.value)}
-                        className="w-full pl-8 pr-7 py-1.5 bg-slate-100 dark:bg-zinc-900 rounded-xl text-xs text-slate-900 dark:text-white placeholder:text-slate-400 border border-transparent focus:border-sky-500 focus:outline-hidden"
-                      />
-                      {uniSearch && (
-                        <button
-                          type="button"
-                          onClick={() => setUniSearch('')}
-                          className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 dark:hover:text-white"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider px-2 py-1">
-                      {filteredUniversities.length} trường đại học phù hợp
-                    </div>
-
-                    <div className="max-h-60 overflow-y-auto space-y-0.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onSelectUniversity('all');
-                          setIsUniOpen(false);
-                          setUniSearch('');
-                        }}
-                        className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between cursor-pointer transition-colors ${
-                          selectedUniversityId === 'all'
-                            ? 'bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 font-bold'
-                            : 'hover:bg-slate-100 dark:hover:bg-zinc-900 text-slate-700 dark:text-white'
-                        }`}
-                      >
-                        <span>Toàn bộ trường đại học trên cả nước</span>
-                        {selectedUniversityId === 'all' && (
-                          <Check className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
-                        )}
-                      </button>
-
-                      {filteredUniversities.map((uni) => (
-                        <button
-                          key={uni.id}
-                          type="button"
-                          onClick={() => {
-                            onSelectUniversity(uni.id);
-                            setIsUniOpen(false);
-                            setUniSearch('');
-                          }}
-                          className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between cursor-pointer transition-colors ${
-                            selectedUniversityId === uni.id
-                              ? 'bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 font-bold'
-                              : 'hover:bg-slate-100 dark:hover:bg-zinc-900 text-slate-700 dark:text-white'
-                          }`}
-                        >
-                          <div className="min-w-0 pr-2">
-                            <div className="font-bold truncate text-slate-900 dark:text-white">
-                              {uni.shortName}
-                            </div>
-                            <div className="text-[10px] text-slate-500 dark:text-zinc-400 truncate">
-                              {uni.name} ({uni.city})
-                            </div>
-                          </div>
-                          {selectedUniversityId === uni.id && (
-                            <Check className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="hidden sm:block w-px h-5 bg-slate-300 dark:bg-zinc-700 shrink-0" />
-
-              {/* 2. TÌM KIẾM & LỌC THEO NGÀNH HỌC (Interactive Searchable Combobox) */}
-              <div className="relative shrink-0" ref={majorRef}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsMajorOpen(!isMajorOpen);
-                    setIsUniOpen(false);
-                  }}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white dark:bg-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-800 sm:bg-transparent sm:dark:bg-transparent rounded-xl border sm:border-0 border-slate-200 dark:border-zinc-700 text-xs text-left cursor-pointer transition-colors w-full sm:w-auto"
-                >
-                  <GraduationCap className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                  <span className="text-[11px] font-bold text-slate-400 dark:text-zinc-300 hidden xl:inline">Ngành:</span>
-                  <span className="font-bold text-slate-800 dark:text-white truncate max-w-[125px]">
-                    {selectedMajor === 'all' ? 'Tất cả ngành' : selectedMajor}
-                  </span>
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-300 shrink-0 ml-0.5" />
-                </button>
-
-                {/* Major Searchable Dropdown Popover */}
-                {isMajorOpen && (
-                  <div className="absolute left-0 top-full mt-2 w-72 sm:w-80 bg-white dark:bg-zinc-950 rounded-2xl shadow-2xl border border-slate-200 dark:border-zinc-800 p-2.5 z-50 animate-in fade-in zoom-in-95">
-                    <div className="relative mb-2">
-                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-                      <input
-                        type="text"
-                        autoFocus
-                        placeholder="Tìm tên ngành (ví dụ CNTT, Y khoa, Kinh tế...)"
-                        value={majorSearch}
-                        onChange={(e) => setMajorSearch(e.target.value)}
-                        className="w-full pl-8 pr-7 py-1.5 bg-slate-100 dark:bg-zinc-900 rounded-xl text-xs text-slate-900 dark:text-white placeholder:text-slate-400 border border-transparent focus:border-sky-500 focus:outline-hidden"
-                      />
-                      {majorSearch && (
-                        <button
-                          type="button"
-                          onClick={() => setMajorSearch('')}
-                          className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 dark:hover:text-white"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="max-h-60 overflow-y-auto space-y-0.5">
-                      {filteredMajors.map((m) => (
-                        <button
-                          key={m}
-                          type="button"
-                          onClick={() => {
-                            onSelectMajor(m === 'Tất cả ngành học' ? 'all' : m);
-                            setIsMajorOpen(false);
-                            setMajorSearch('');
-                          }}
-                          className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between cursor-pointer transition-colors ${
-                            (m === 'Tất cả ngành học' && selectedMajor === 'all') || selectedMajor === m
-                              ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-bold'
-                              : 'hover:bg-slate-100 dark:hover:bg-zinc-900 text-slate-700 dark:text-white'
-                          }`}
-                        >
-                          <span className="truncate">{m}</span>
-                          {((m === 'Tất cả ngành học' && selectedMajor === 'all') ||
-                            selectedMajor === m) && (
-                            <Check className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="hidden sm:block w-px h-5 bg-slate-300 dark:bg-zinc-700 shrink-0" />
-
-              {/* 3. LỌC THEO GIÁ KÉO TỪ 0 ĐẾN 200K */}
-              <div className="relative shrink-0" ref={priceRef}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsPriceOpen(!isPriceOpen);
-                    setIsUniOpen(false);
-                    setIsMajorOpen(false);
-                  }}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border sm:border-0 text-xs text-left cursor-pointer transition-colors w-full sm:w-auto ${
-                    maxPrice < 200000
-                      ? 'bg-sky-50 dark:bg-sky-950/60 border-sky-300 text-sky-700 dark:text-sky-300'
-                      : 'bg-white dark:bg-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-800 sm:bg-transparent sm:dark:bg-transparent border-slate-200 dark:border-zinc-700'
-                  }`}
-                >
-                  <SlidersHorizontal className="w-3.5 h-3.5 text-[#4086ee] dark:text-sky-400 shrink-0" />
-                  <span className="font-bold text-slate-800 dark:text-white whitespace-nowrap">
-                    {maxPrice < 200000 ? `0–${formatPriceCompact(maxPrice)}` : 'Giá 0–200k'}
-                  </span>
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-300 shrink-0" />
-                </button>
-
-                {isPriceOpen && (
-                  <div className="absolute left-0 sm:right-0 sm:left-auto top-full mt-2 w-72 bg-white dark:bg-zinc-950 rounded-2xl shadow-2xl border border-slate-200 dark:border-zinc-800 p-4 z-50 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-800 dark:text-white">
-                        Lọc theo giá (0 – 200k)
-                      </span>
-                      <span className="text-xs font-extrabold text-[#4086ee] dark:text-sky-400">
-                        0đ – {formatVND(maxPrice)}
-                      </span>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <input
-                        type="range"
-                        min={0}
-                        max={200000}
-                        step={5000}
-                        value={maxPrice}
-                        onChange={(e) => onMaxPriceChange(Number(e.target.value))}
-                        aria-label="Kéo chọn mức giá tối đa từ 0 đến 200k"
-                        className="w-full accent-[#4086ee] cursor-pointer"
-                      />
-                      <div className="flex items-center justify-between text-[10px] font-semibold text-slate-400 dark:text-zinc-400">
-                        <span>0đ</span>
-                        <span>50k</span>
-                        <span>100k</span>
-                        <span>150k</span>
-                        <span>200k</span>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-100 dark:border-zinc-800">
-                      {[
-                        { label: '≤ 30k', value: 30000 },
-                        { label: '≤ 50k', value: 50000 },
-                        { label: '≤ 100k', value: 100000 },
-                        { label: 'Tất cả (0–200k)', value: 200000 },
-                      ].map((preset) => (
-                        <button
-                          key={preset.value}
-                          type="button"
-                          onClick={() => onMaxPriceChange(preset.value)}
-                          className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${
-                            maxPrice === preset.value
-                              ? 'bg-[#4086ee] text-white border-[#4086ee]'
-                              : 'bg-slate-50 dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 border-slate-200 dark:border-zinc-700 hover:border-sky-400'
-                          }`}
-                        >
-                          {preset.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="hidden sm:block w-px h-5 bg-slate-300 dark:bg-zinc-700 shrink-0" />
-
-              {/* 4. Keyword Search Input */}
-              <div className="relative flex-1 flex items-center min-w-[130px]">
-                <Search className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-400 absolute left-2 pointer-events-none" />
-                <input
-                  type="text"
-                  placeholder="Tìm tên sách, tác giả, môn học..."
-                  value={searchQuery}
-                  onChange={(e) => onSearchChange(e.target.value)}
-                  className="w-full pl-7 pr-6 py-1.5 bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-400 focus:outline-hidden"
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => onSearchChange('')}
-                    className="absolute right-2 text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* GIỎ HÀNG KẾ BÊN THANH TÌM KIẾM */}
-            <button
-              onClick={onOpenCart}
-              title="Giỏ hàng giáo trình"
-              className="relative flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-2xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs sm:text-sm shadow-md shadow-amber-400/20 active:scale-95 transition-all cursor-pointer shrink-0 border border-amber-300"
-            >
-              <div className="relative">
-                <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5 text-slate-950" />
-                {cartCount > 0 && (
-                  <span className="absolute -top-2 -right-2 w-4 h-4 rounded-full bg-rose-600 text-white text-[10px] font-black flex items-center justify-center shadow-xs">
-                    {cartCount}
-                  </span>
-                )}
-              </div>
-              <span className="hidden sm:inline">Giỏ hàng</span>
-            </button>
-          </div>
-
-          {/* Right Utilities (Theme Sáng/Tối, Tin nhắn & Thẻ sinh viên) */}
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {/* Chế độ nền Sáng / Tối (Light/Dark Toggle) */}
-            {onToggleDarkMode && (
+          {/* Right Utilities: [Giỏ hàng] + [Sáng/Tối] + [Yêu thích] + Thông báo, Tin nhắn & Tài khoản */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap justify-end">
+            {/* Cụm Giỏ hàng & Nút chỉnh chế độ Sáng/Tối kế bên giỏ hàng */}
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              {/* GIỎ HÀNG */}
               <button
-                type="button"
-                onClick={onToggleDarkMode}
-                title={darkMode ? 'Chuyển sang nền sáng' : 'Chuyển sang nền tối'}
-                className="p-2.5 rounded-xl text-slate-700 dark:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                onClick={onOpenCart}
+                title="Giỏ hàng giáo trình"
+                className="relative flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-2xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs sm:text-sm shadow-md shadow-amber-400/20 active:scale-95 transition-all cursor-pointer shrink-0 border border-amber-300"
               >
-                {darkMode ? (
-                  <Sun className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400" />
-                ) : (
-                  <Moon className="w-4 h-4 sm:w-5 sm:h-5 text-slate-600" />
-                )}
+                <div className="relative">
+                  <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5 text-slate-950" />
+                  {cartCount > 0 && (
+                    <span className="absolute -top-2 -right-2 w-4 h-4 rounded-full bg-rose-600 text-white text-[10px] font-black flex items-center justify-center shadow-xs">
+                      {cartCount}
+                    </span>
+                  )}
+                </div>
+                <span className="hidden sm:inline">Giỏ hàng</span>
               </button>
-            )}
 
-            {/* Favorites button (Yêu thích - icon trái tim) */}
-            {onNavigateTab && (
-              <button
-                type="button"
-                onClick={() => onNavigateTab('favorites')}
-                title="Danh sách yêu thích"
-                aria-label="Mở danh sách yêu thích"
-                className={`relative p-2.5 rounded-xl transition-colors cursor-pointer ${
-                  currentNavTab === 'favorites'
-                    ? 'bg-[#edf8fe] dark:bg-sky-500/20 text-[#4086ee] dark:text-sky-400'
-                    : 'text-slate-700 dark:text-white hover:bg-slate-100 dark:hover:bg-zinc-800'
-                }`}
-              >
-                <Heart
-                  className={`w-5 h-5 ${
+              {/* Nút chỉnh chế độ Sáng / Tối đặt ngay kế bên Giỏ hàng */}
+              {onToggleDarkMode && (
+                <button
+                  type="button"
+                  onClick={onToggleDarkMode}
+                  title={darkMode ? 'Chuyển sang nền sáng' : 'Chuyển sang nền tối'}
+                  aria-label={darkMode ? 'Chuyển sang nền sáng' : 'Chuyển sang nền tối'}
+                  className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-900 text-slate-700 dark:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer shrink-0"
+                >
+                  {darkMode ? (
+                    <Sun className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400" />
+                  ) : (
+                    <Moon className="w-4 h-4 sm:w-5 sm:h-5 text-slate-600" />
+                  )}
+                </button>
+              )}
+
+              {/* Favorites button (Yêu thích - icon trái tim) */}
+              {onNavigateTab && (
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab('favorites')}
+                  title="Danh sách yêu thích"
+                  aria-label="Mở danh sách yêu thích"
+                  className={`relative w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-xl transition-colors cursor-pointer shrink-0 ${
                     currentNavTab === 'favorites'
-                      ? 'fill-[#4086ee] text-[#4086ee] dark:fill-sky-400 dark:text-sky-400'
-                      : ''
+                      ? 'bg-[#edf8fe] dark:bg-sky-500/20 text-[#4086ee] dark:text-sky-400'
+                      : 'text-slate-700 dark:text-white hover:bg-slate-100 dark:hover:bg-zinc-800'
                   }`}
-                />
-                {favoritesCount > 0 && (
-                  <span className="absolute top-1 right-1 min-w-4 h-4 px-1 rounded-full bg-[#4086ee] text-white text-[10px] font-black flex items-center justify-center tabular-nums">
-                    {favoritesCount}
-                  </span>
-                )}
-              </button>
-            )}
+                >
+                  <Heart
+                    className={`w-5 h-5 ${
+                      currentNavTab === 'favorites'
+                        ? 'fill-[#4086ee] text-[#4086ee] dark:fill-sky-400 dark:text-sky-400'
+                        : ''
+                    }`}
+                  />
+                  {favoritesCount > 0 && (
+                    <span className="absolute top-1 right-1 min-w-4 h-4 px-1 rounded-full bg-[#4086ee] text-white text-[10px] font-black flex items-center justify-center tabular-nums">
+                      {favoritesCount}
+                    </span>
+                  )}
+                </button>
+              )}
+            </div>
 
             {/* Notification button */}
             {onOpenNotifications && (
@@ -653,17 +386,304 @@ export const Navbar: React.FC<NavbarProps> = ({
                 title="Hồ sơ sinh viên đã xác thực"
                 className="flex items-center gap-1.5 pl-2 pr-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-xs font-semibold text-slate-800 dark:text-white transition-colors cursor-pointer"
               >
-                <div className="w-6 h-6 rounded-full bg-sky-600 text-white flex items-center justify-center text-xs font-bold">
-                  SV
-                </div>
+                <RankAvatar
+                  src={userAvatar}
+                  alt="Avatar sinh viên"
+                  tier={userRankTier}
+                  size="xs"
+                  fallbackText={(userDisplayName || 'SV').slice(0, 2).toUpperCase()}
+                />
                 <div className="hidden xl:flex flex-col text-left leading-tight">
-                  <span className="text-[11px] font-bold">2010***</span>
+                  <span className="text-[11px] font-bold max-w-[100px] truncate">
+                    {userDisplayName || 'Sinh viên'}
+                  </span>
                   <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-0.5">
                     <ShieldCheck className="w-2.5 h-2.5" /> Đã xác thực
                   </span>
                 </div>
               </button>
             )}
+          </div>
+        </div>
+
+        {/* Row 2: Full-width ADVANCED SEARCH BAR (separated cleanly below Row 1 so Giỏ hàng never overlaps it) */}
+        <div className="w-full min-w-0 flex items-center">
+          {/* Search container with interactive searchable dropdowns */}
+          <div className="w-full flex-1 min-w-0 flex flex-col sm:flex-row items-stretch sm:items-center bg-slate-100 dark:bg-zinc-900 focus-within:bg-white dark:focus-within:bg-zinc-900 border border-slate-200 dark:border-zinc-700 focus-within:border-sky-500 rounded-2xl p-1 gap-1 focus-within:ring-2 focus-within:ring-sky-500/20 transition-all shadow-xs relative">
+            {/* 1. TÌM KIẾM & LỌC THEO TRƯỜNG ĐẠI HỌC (Interactive Searchable Combobox) */}
+            <div className="relative shrink-0" ref={uniRef}>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsUniOpen(!isUniOpen);
+                  setIsMajorOpen(false);
+                  setIsPriceOpen(false);
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white dark:bg-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-800 sm:bg-transparent sm:dark:bg-transparent rounded-xl border sm:border-0 border-slate-200 dark:border-zinc-700 text-xs text-left cursor-pointer transition-colors w-full sm:w-auto"
+              >
+                <Building2 className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
+                <span className="text-[11px] font-bold text-slate-400 dark:text-zinc-300 hidden md:inline">Trường:</span>
+                <span className="font-bold text-slate-800 dark:text-white truncate max-w-[160px] sm:max-w-[125px] lg:max-w-[155px]">
+                  {selectedUni ? selectedUni.shortName : 'Tất cả trường'}
+                </span>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-300 shrink-0 ml-0.5" />
+              </button>
+
+              {/* University Searchable Dropdown Popover */}
+              {isUniOpen && (
+                <div className="absolute left-0 top-full mt-2 w-72 sm:w-80 bg-white dark:bg-zinc-950 rounded-2xl shadow-2xl border border-slate-200 dark:border-zinc-800 p-2.5 z-50 animate-in fade-in zoom-in-95">
+                  <div className="relative mb-2">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                    <input
+                      type="text"
+                      autoFocus
+                      placeholder="Tìm tên trường (ví dụ Bách Khoa, UEH, Y Dược...)"
+                      value={uniSearch}
+                      onChange={(e) => setUniSearch(e.target.value)}
+                      className="w-full pl-8 pr-7 py-1.5 bg-slate-100 dark:bg-zinc-900 rounded-xl text-xs text-slate-900 dark:text-white placeholder:text-slate-400 border border-transparent focus:border-sky-500 focus:outline-hidden"
+                    />
+                    {uniSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setUniSearch('')}
+                        className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider px-2 py-1">
+                    {filteredUniversities.length} trường đại học phù hợp
+                  </div>
+
+                  <div className="max-h-60 overflow-y-auto space-y-0.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onSelectUniversity('all');
+                        setIsUniOpen(false);
+                        setUniSearch('');
+                      }}
+                      className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between cursor-pointer transition-colors ${
+                        selectedUniversityId === 'all'
+                          ? 'bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 font-bold'
+                          : 'hover:bg-slate-100 dark:hover:bg-zinc-900 text-slate-700 dark:text-white'
+                      }`}
+                    >
+                      <span>Toàn bộ trường đại học trên cả nước</span>
+                      {selectedUniversityId === 'all' && (
+                        <Check className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+                      )}
+                    </button>
+
+                    {filteredUniversities.map((uni) => (
+                      <button
+                        key={uni.id}
+                        type="button"
+                        onClick={() => {
+                          onSelectUniversity(uni.id);
+                          setIsUniOpen(false);
+                          setUniSearch('');
+                        }}
+                        className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between cursor-pointer transition-colors ${
+                          selectedUniversityId === uni.id
+                            ? 'bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 font-bold'
+                            : 'hover:bg-slate-100 dark:hover:bg-zinc-900 text-slate-700 dark:text-white'
+                        }`}
+                      >
+                        <div className="min-w-0 pr-2">
+                          <div className="font-bold truncate text-slate-900 dark:text-white">
+                            {uni.shortName}
+                          </div>
+                          <div className="text-[10px] text-slate-500 dark:text-zinc-400 truncate">
+                            {uni.name} ({uni.city})
+                          </div>
+                        </div>
+                        {selectedUniversityId === uni.id && (
+                          <Check className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="hidden sm:block w-px h-5 bg-slate-300 dark:bg-zinc-700 shrink-0" />
+
+            {/* 2. TÌM KIẾM & LỌC THEO NGÀNH HỌC (Interactive Searchable Combobox) */}
+            <div className="relative shrink-0" ref={majorRef}>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMajorOpen(!isMajorOpen);
+                  setIsUniOpen(false);
+                  setIsPriceOpen(false);
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white dark:bg-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-800 sm:bg-transparent sm:dark:bg-transparent rounded-xl border sm:border-0 border-slate-200 dark:border-zinc-700 text-xs text-left cursor-pointer transition-colors w-full sm:w-auto"
+              >
+                <GraduationCap className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                <span className="text-[11px] font-bold text-slate-400 dark:text-zinc-300 hidden md:inline">Ngành:</span>
+                <span className="font-bold text-slate-800 dark:text-white truncate max-w-[160px] sm:max-w-[125px] lg:max-w-[155px]">
+                  {selectedMajor === 'all' ? 'Tất cả ngành' : selectedMajor}
+                </span>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-300 shrink-0 ml-0.5" />
+              </button>
+
+              {/* Major Searchable Dropdown Popover */}
+              {isMajorOpen && (
+                <div className="absolute left-0 top-full mt-2 w-72 sm:w-80 bg-white dark:bg-zinc-950 rounded-2xl shadow-2xl border border-slate-200 dark:border-zinc-800 p-2.5 z-50 animate-in fade-in zoom-in-95">
+                  <div className="relative mb-2">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                    <input
+                      type="text"
+                      autoFocus
+                      placeholder="Tìm tên ngành (ví dụ CNTT, Y khoa, Kinh tế...)"
+                      value={majorSearch}
+                      onChange={(e) => setMajorSearch(e.target.value)}
+                      className="w-full pl-8 pr-7 py-1.5 bg-slate-100 dark:bg-zinc-900 rounded-xl text-xs text-slate-900 dark:text-white placeholder:text-slate-400 border border-transparent focus:border-sky-500 focus:outline-hidden"
+                    />
+                    {majorSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setMajorSearch('')}
+                        className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="max-h-60 overflow-y-auto space-y-0.5">
+                    {filteredMajors.map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => {
+                          onSelectMajor(m === 'Tất cả ngành học' ? 'all' : m);
+                          setIsMajorOpen(false);
+                          setMajorSearch('');
+                        }}
+                        className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between cursor-pointer transition-colors ${
+                          (m === 'Tất cả ngành học' && selectedMajor === 'all') || selectedMajor === m
+                            ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-bold'
+                            : 'hover:bg-slate-100 dark:hover:bg-zinc-900 text-slate-700 dark:text-white'
+                        }`}
+                      >
+                        <span className="truncate">{m}</span>
+                        {((m === 'Tất cả ngành học' && selectedMajor === 'all') ||
+                          selectedMajor === m) && (
+                          <Check className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="hidden sm:block w-px h-5 bg-slate-300 dark:bg-zinc-700 shrink-0" />
+
+            {/* 3. LỌC THEO GIÁ KÉO TỪ 0 ĐẾN 200K */}
+            <div className="relative shrink-0" ref={priceRef}>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPriceOpen(!isPriceOpen);
+                  setIsUniOpen(false);
+                  setIsMajorOpen(false);
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border sm:border-0 text-xs text-left cursor-pointer transition-colors w-full sm:w-auto ${
+                  maxPrice < 200000
+                    ? 'bg-sky-50 dark:bg-sky-950/60 border-sky-300 text-sky-700 dark:text-sky-300'
+                    : 'bg-white dark:bg-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-800 sm:bg-transparent sm:dark:bg-transparent border-slate-200 dark:border-zinc-700'
+                }`}
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5 text-[#4086ee] dark:text-sky-400 shrink-0" />
+                <span className="font-bold text-slate-800 dark:text-white whitespace-nowrap">
+                  {maxPrice < 200000 ? `0–${formatPriceCompact(maxPrice)}` : 'Giá 0–200k'}
+                </span>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-300 shrink-0" />
+              </button>
+
+              {isPriceOpen && (
+                <div className="absolute left-0 sm:right-0 sm:left-auto top-full mt-2 w-72 bg-white dark:bg-zinc-950 rounded-2xl shadow-2xl border border-slate-200 dark:border-zinc-800 p-4 z-50 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-800 dark:text-white">
+                      Lọc theo giá (0 – 200k)
+                    </span>
+                    <span className="text-xs font-extrabold text-[#4086ee] dark:text-sky-400">
+                      0đ – {formatVND(maxPrice)}
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <input
+                      type="range"
+                      min={0}
+                      max={200000}
+                      step={5000}
+                      value={maxPrice}
+                      onChange={(e) => onMaxPriceChange(Number(e.target.value))}
+                      aria-label="Kéo chọn mức giá tối đa từ 0 đến 200k"
+                      className="w-full accent-[#4086ee] cursor-pointer"
+                    />
+                    <div className="flex items-center justify-between text-[10px] font-semibold text-slate-400 dark:text-zinc-400">
+                      <span>0đ</span>
+                      <span>50k</span>
+                      <span>100k</span>
+                      <span>150k</span>
+                      <span>200k</span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-100 dark:border-zinc-800">
+                    {[
+                      { label: '≤ 30k', value: 30000 },
+                      { label: '≤ 50k', value: 50000 },
+                      { label: '≤ 100k', value: 100000 },
+                      { label: 'Tất cả (0–200k)', value: 200000 },
+                    ].map((preset) => (
+                      <button
+                        key={preset.value}
+                        type="button"
+                        onClick={() => onMaxPriceChange(preset.value)}
+                        className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${
+                          maxPrice === preset.value
+                            ? 'bg-[#4086ee] text-white border-[#4086ee]'
+                            : 'bg-slate-50 dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 border-slate-200 dark:border-zinc-700 hover:border-sky-400'
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="hidden sm:block w-px h-5 bg-slate-300 dark:bg-zinc-700 shrink-0" />
+
+            {/* 4. Keyword Search Input */}
+            <div className="relative flex-1 flex items-center min-w-0">
+              <Search className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-400 absolute left-2 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Tìm tên sách, tác giả, môn học..."
+                value={searchQuery}
+                onChange={(e) => onSearchChange(e.target.value)}
+                className="w-full min-w-0 pl-7 pr-6 py-1.5 bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-400 focus:outline-hidden"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => onSearchChange('')}
+                  className="absolute right-2 text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>

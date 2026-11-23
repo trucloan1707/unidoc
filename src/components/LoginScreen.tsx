@@ -1,17 +1,19 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UniDocLogo } from './UniDocLogo';
+import { findAccountByEmail } from '../utils/accountRegistry';
 import {
   Mail,
   Lock,
   Eye,
   EyeOff,
   ArrowLeft,
-  X,
-  CheckCircle2,
+  Loader2,
 } from 'lucide-react';
 
 interface LoginScreenProps {
+  initialEmail?: string;
   onSwitchToRegister: () => void;
+  onSwitchToForgotPassword: (prefillEmail?: string) => void;
   onLoginSuccess: (email: string) => void;
   onBackToHome: () => void;
 }
@@ -121,24 +123,37 @@ const LoginAcademicIllustration: React.FC = () => (
 );
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({
+  initialEmail = '',
   onSwitchToRegister,
+  onSwitchToForgotPassword,
   onLoginSuccess,
   onBackToHome,
 }) => {
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(() => {
+    if (initialEmail) return initialEmail;
+    try {
+      return localStorage.getItem('unidoc_saved_email') || '';
+    } catch {
+      return '';
+    }
+  });
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  // Forgot password modal state
-  const [isForgotOpen, setIsForgotOpen] = useState(false);
-  const [forgotEmail, setForgotEmail] = useState('');
-  const [forgotSent, setForgotSent] = useState(false);
+  useEffect(() => {
+    if (initialEmail) {
+      setEmail(initialEmail);
+    }
+  }, [initialEmail]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim() || !email.includes('@')) {
+    const cleanedEmail = email.trim().toLowerCase();
+
+    if (!cleanedEmail || !cleanedEmail.includes('@')) {
       setErrorMsg('Vui lòng nhập email sinh viên hợp lệ.');
       return;
     }
@@ -146,19 +161,52 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       setErrorMsg('Vui lòng nhập mật khẩu để đăng nhập.');
       return;
     }
-    setErrorMsg(null);
-    if (rememberMe) {
-      try {
-        localStorage.setItem('unidoc_saved_email', email.trim());
-      } catch {}
-    }
-    onLoginSuccess(email.trim());
-  };
 
-  const handleForgotSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!forgotEmail.trim() || !forgotEmail.includes('@')) return;
-    setForgotSent(true);
+    // Verify locally stored/reset password if account exists in registry
+    const localAccount = findAccountByEmail(cleanedEmail);
+    if (
+      localAccount &&
+      typeof localAccount.password === 'string' &&
+      localAccount.password.length > 0 &&
+      localAccount.password !== password
+    ) {
+      setErrorMsg('Mật khẩu không chính xác. Vui lòng thử lại hoặc chọn "Quên mật khẩu?".');
+      return;
+    }
+
+    setIsLoggingIn(true);
+    setErrorMsg(null);
+    try {
+      const verifyRes = await fetch('/api/auth/verify-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanedEmail, password }),
+      });
+      if (verifyRes.status === 401) {
+        const errData = await verifyRes.json().catch(() => ({}));
+        setErrorMsg(
+          errData.error ||
+            'Mật khẩu không chính xác. Vui lòng thử lại hoặc chọn "Quên mật khẩu?".'
+        );
+        return;
+      }
+
+      if (rememberMe) {
+        try {
+          localStorage.setItem('unidoc_saved_email', cleanedEmail);
+        } catch {}
+      }
+      onLoginSuccess(cleanedEmail);
+    } catch {
+      if (rememberMe) {
+        try {
+          localStorage.setItem('unidoc_saved_email', cleanedEmail);
+        } catch {}
+      }
+      onLoginSuccess(cleanedEmail);
+    } finally {
+      setIsLoggingIn(false);
+    }
   };
 
   return (
@@ -275,11 +323,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
               <button
                 type="button"
-                onClick={() => {
-                  setForgotEmail(email);
-                  setForgotSent(false);
-                  setIsForgotOpen(true);
-                }}
+                onClick={() => onSwitchToForgotPassword(email.trim())}
                 className="font-bold text-[#4086ee] hover:text-[#0860c9] hover:underline cursor-pointer"
               >
                 Quên mật khẩu?
@@ -289,9 +333,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             {/* Primary CTA "Đăng nhập" */}
             <button
               type="submit"
-              className="w-full py-3.5 rounded-2xl bg-[#4086ee] hover:bg-[#0860c9] text-white font-bold text-sm sm:text-base shadow-md shadow-[#4086ee]/25 active:scale-[0.99] transition-all cursor-pointer"
+              disabled={isLoggingIn}
+              className="w-full py-3.5 rounded-2xl bg-[#4086ee] hover:bg-[#0860c9] disabled:opacity-70 text-white font-bold text-sm sm:text-base shadow-md shadow-[#4086ee]/25 active:scale-[0.99] transition-all cursor-pointer inline-flex items-center justify-center gap-2"
             >
-              Đăng nhập
+              {isLoggingIn ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Đang đăng nhập...</span>
+                </>
+              ) : (
+                <span>Đăng nhập</span>
+              )}
             </button>
           </form>
 
@@ -316,69 +368,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       </main>
 
       <div className="h-2" />
-
-      {/* Forgot Password Modal */}
-      {isForgotOpen && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setIsForgotOpen(false)}
-        >
-          <div
-            className="bg-white dark:bg-zinc-950 w-full max-w-sm rounded-[20px] border border-[#b9e7ff] dark:border-zinc-800 shadow-2xl p-5 sm:p-6 space-y-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-black text-[#0860c9] dark:text-white">
-                Khôi phục mật khẩu
-              </h3>
-              <button
-                type="button"
-                onClick={() => setIsForgotOpen(false)}
-                className="p-1.5 rounded-xl bg-[#edf8fe] dark:bg-zinc-900 text-[#0860c9] dark:text-white cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {forgotSent ? (
-              <div className="text-center space-y-3 py-2">
-                <CheckCircle2 className="w-10 h-10 text-[#4086ee] mx-auto" />
-                <p className="text-xs sm:text-sm text-[#5b728f] dark:text-zinc-300 leading-relaxed">
-                  Liên kết đặt lại mật khẩu đã được gửi tới{' '}
-                  <b className="text-[#0860c9] dark:text-white">{forgotEmail}</b>. Vui lòng kiểm tra hộp thư sinh viên của bạn.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setIsForgotOpen(false)}
-                  className="w-full py-2.5 rounded-xl bg-[#4086ee] text-white text-xs font-bold cursor-pointer"
-                >
-                  Đóng
-                </button>
-              </div>
-            ) : (
-              <form onSubmit={handleForgotSubmit} className="space-y-3">
-                <p className="text-xs text-[#5b728f] dark:text-zinc-400">
-                  Nhập email sinh viên đã đăng ký để nhận liên kết đặt lại mật khẩu mới.
-                </p>
-                <input
-                  type="email"
-                  required
-                  value={forgotEmail}
-                  onChange={(e) => setForgotEmail(e.target.value)}
-                  placeholder="example@edu.vn"
-                  className="w-full h-11 px-3.5 rounded-xl bg-[#edf8fe]/60 dark:bg-zinc-900 border border-[#b9e7ff] dark:border-zinc-700 text-sm text-[#0860c9] dark:text-white focus:outline-hidden focus:border-[#4086ee]"
-                />
-                <button
-                  type="submit"
-                  className="w-full py-2.5 rounded-xl bg-[#4086ee] hover:bg-[#0860c9] text-white text-xs font-bold cursor-pointer"
-                >
-                  Gửi yêu cầu khôi phục
-                </button>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 };

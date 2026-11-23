@@ -15,12 +15,19 @@ import {
 } from 'lucide-react';
 import { processImageFiles } from '../utils/imageUpload';
 
+interface AddReviewUser {
+  id: string;
+  name: string;
+  avatar?: string;
+}
+
 interface AddReviewModalProps {
   book: Book;
   currentUserBuyerBadge: HumorousBadgeInfo;
   isOpen: boolean;
   onClose: () => void;
   onSubmitReview: (review: Omit<BookReview, 'id' | 'createdAt' | 'likes'>) => void;
+  currentUser?: AddReviewUser;
 }
 
 export const AddReviewModal: React.FC<AddReviewModalProps> = ({
@@ -29,6 +36,7 @@ export const AddReviewModal: React.FC<AddReviewModalProps> = ({
   isOpen,
   onClose,
   onSubmitReview,
+  currentUser,
 }) => {
   const [rating, setRating] = useState(5);
   const [hoverRating, setHoverRating] = useState(0);
@@ -108,15 +116,13 @@ export const AddReviewModal: React.FC<AddReviewModalProps> = ({
       bookId: book.id,
       bookTitle: book.title,
       sellerId: book.seller.id,
-      reviewerId: 'user_current',
-      reviewerName: 'Trần Văn Nam',
+      reviewerId: currentUser?.id || 'user_current',
+      reviewerName: currentUser?.name || 'Sinh viên UniDoc',
       isAnonymous,
       anonymousAlias: isAnonymous
-        ? `Sinh viên ${book.major.slice(0, 10)} ẩn danh (K22)`
+        ? `Sinh viên ${book.major.slice(0, 10)} ẩn danh`
         : undefined,
-      reviewerAvatar: isAnonymous
-        ? undefined
-        : 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80',
+      reviewerAvatar: isAnonymous ? undefined : currentUser?.avatar,
       rating,
       breakdown,
       comment,

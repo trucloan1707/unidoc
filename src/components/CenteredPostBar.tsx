@@ -97,7 +97,7 @@ export const CenteredPostBar: React.FC<CenteredPostBarProps> = ({
               onClick={onOpenTitlesGuide}
               className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-amber-200 transition-colors cursor-pointer hidden md:inline-flex items-center gap-1"
             >
-              Hạng: "Chiến Thần Pass Sách K70" 🔥
+              Hạng 5: "Huyền Thoại Tàng Kinh Các" 👑
             </button>
           </div>
           <div className="text-[11px] text-blue-200/90 ml-auto hidden sm:block">

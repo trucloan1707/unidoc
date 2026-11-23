@@ -288,11 +288,13 @@ export const FavoritesView: React.FC<FavoritesViewProps> = ({
         {/* OVERVIEW ROW & RIGHT CONTENT SEARCH / SORT ICON ACTIONS */}
         <div className="bg-white dark:bg-zinc-950 rounded-[18px] border border-[#b9e7ff] dark:border-zinc-800 shadow-[0_6px_22px_rgba(64,134,238,0.08)] p-4 sm:p-5 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            {/* Overview line: "Bạn đang lưu X sản phẩm" + small heart icon */}
+            {/* Overview line: "Bạn đang lưu X sản phẩm" or clean empty message */}
             <div className="flex items-center gap-2 text-sm sm:text-base font-bold text-[#0860c9] dark:text-white">
               <Heart className="w-4 h-4 fill-[#4086ee] text-[#4086ee] shrink-0" />
               <span className="tabular-nums">
-                Bạn đang lưu {favoriteBooks.length} sản phẩm
+                {favoriteBooks.length > 0
+                  ? `Bạn đang lưu ${favoriteBooks.length} sản phẩm`
+                  : 'Chưa có sản phẩm yêu thích nào'}
               </span>
             </div>
 
@@ -371,7 +373,7 @@ export const FavoritesView: React.FC<FavoritesViewProps> = ({
                     : 'bg-white dark:bg-zinc-900 text-[#0860c9] dark:text-white border-[#b9e7ff] dark:border-zinc-700 hover:bg-[#edf8fe] dark:hover:bg-zinc-800'
                 }`}
               >
-                Tất cả ({favoriteBooks.length})
+                {favoriteBooks.length > 0 ? `Tất cả (${favoriteBooks.length})` : 'Tất cả'}
               </button>
 
               <button
@@ -383,7 +385,7 @@ export const FavoritesView: React.FC<FavoritesViewProps> = ({
                     : 'bg-[#edf8fe]/70 dark:bg-zinc-900 text-[#0860c9] dark:text-white border-[#b9e7ff] dark:border-zinc-700 hover:bg-[#edf8fe] dark:hover:bg-zinc-800'
                 }`}
               >
-                Sách cũ ({booksCount})
+                {booksCount > 0 ? `Sách cũ (${booksCount})` : 'Sách cũ'}
               </button>
 
               <button
@@ -395,7 +397,7 @@ export const FavoritesView: React.FC<FavoritesViewProps> = ({
                     : 'bg-[#edf8fe]/70 dark:bg-zinc-900 text-[#0860c9] dark:text-white border-[#b9e7ff] dark:border-zinc-700 hover:bg-[#edf8fe] dark:hover:bg-zinc-800'
                 }`}
               >
-                Tài liệu số ({digitalCount})
+                {digitalCount > 0 ? `Tài liệu số (${digitalCount})` : 'Tài liệu số'}
               </button>
             </div>
 

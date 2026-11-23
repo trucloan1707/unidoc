@@ -36,3 +36,69 @@ html.dark ::-webkit-scrollbar-thumb {
 html.dark ::-webkit-scrollbar-thumb:hover {
   background: #3f3f46;
 }
+
+/* Rank Avatar Frame & Badge Animations */
+@keyframes unidocPlatinumGlow {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(186, 230, 253, 0.75), 0 0 18px rgba(56, 189, 248, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 14px rgba(224, 242, 254, 0.95), 0 0 28px rgba(56, 189, 248, 0.75);
+  }
+}
+
+@keyframes unidocLegendarySpin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes unidocLegendaryAura {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(251, 191, 36, 0.75), 0 0 22px rgba(245, 158, 11, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(253, 224, 71, 0.95), 0 0 32px rgba(249, 115, 22, 0.75);
+  }
+}
+
+@keyframes unidocSparkleTwinkle {
+  0%, 100% {
+    opacity: 0.45;
+    transform: scale(0.85) rotate(0deg);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2) rotate(18deg);
+  }
+}
+
+.unidoc-frame-platinum {
+  animation: unidocPlatinumGlow 2.4s ease-in-out infinite;
+}
+
+.unidoc-frame-legendary-ring {
+  background: conic-gradient(
+    from 0deg,
+    #f59e0b,
+    #fef08a,
+    #fbbf24,
+    #fff7ed,
+    #f97316,
+    #fde047,
+    #f59e0b
+  );
+  animation: unidocLegendarySpin 4s linear infinite;
+}
+
+.unidoc-frame-legendary-aura {
+  animation: unidocLegendaryAura 2.2s ease-in-out infinite;
+}
+
+.unidoc-sparkle-twinkle {
+  animation: unidocSparkleTwinkle 1.6s ease-in-out infinite;
+}
+

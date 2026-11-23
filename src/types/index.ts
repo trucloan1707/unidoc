@@ -11,8 +11,11 @@ export interface HumorousBadgeInfo {
   textColor: string;
   bgGradient: string;
   description: string;
+  milestoneLabel?: string;
   funnyQuote: string;
   perk: string;
+  perks?: string[];
+  avatarFrameLabel?: string;
 }
 
 export interface ReviewBreakdown {

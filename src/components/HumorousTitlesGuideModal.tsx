@@ -1,27 +1,38 @@
-import React, { useState } from 'react';
-import { HUMOROUS_SELLER_BADGES, HUMOROUS_BUYER_BADGES } from '../data/mockData';
+import React from 'react';
+import { UNIDOC_RANK_BADGES } from '../data/mockData';
 import { HumorousBadge } from './HumorousBadge';
-import { X, Trophy, Sparkles, Zap } from 'lucide-react';
+import { RankAvatar, getRankBadgeForCount, getNextRankBadgeForCount } from './RankAvatar';
+import { X, Trophy, Sparkles, CheckCircle2, Crown, Award } from 'lucide-react';
 
 interface HumorousTitlesGuideModalProps {
   isOpen: boolean;
   onClose: () => void;
   userSalesCount?: number;
   userBuyCount?: number;
+  userAvatar?: string;
+  userName?: string;
 }
 
 export const HumorousTitlesGuideModal: React.FC<HumorousTitlesGuideModalProps> = ({
   isOpen,
   onClose,
-  userSalesCount = 5,
-  userBuyCount = 6,
+  userSalesCount = 0,
+  userBuyCount = 0,
+  userAvatar,
+  userName = 'Sinh viên UniDoc',
 }) => {
-  const [activeTab, setActiveTab] = useState<'seller' | 'buyer'>('seller');
-
   if (!isOpen) return null;
 
-  const currentBadges = activeTab === 'seller' ? HUMOROUS_SELLER_BADGES : HUMOROUS_BUYER_BADGES;
-  const currentCount = activeTab === 'seller' ? userSalesCount : userBuyCount;
+  const totalBooksCount = userSalesCount + userBuyCount;
+  const currentBadge = getRankBadgeForCount(totalBooksCount);
+  const nextBadge = getNextRankBadgeForCount(totalBooksCount);
+  const progressPercent =
+    totalBooksCount === 0
+      ? 0
+      : nextBadge
+      ? Math.min(100, Math.round((totalBooksCount / nextBadge.minThreshold) * 100))
+      : 100;
+  const remainingCount = nextBadge ? Math.max(0, nextBadge.minThreshold - totalBooksCount) : 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/75 backdrop-blur-xs animate-in fade-in">
@@ -37,7 +48,7 @@ export const HumorousTitlesGuideModal: React.FC<HumorousTitlesGuideModalProps> =
                 Hệ Thống Danh Hiệu UniDoc
               </h2>
               <p className="text-xs text-slate-500 dark:text-zinc-400">
-                Thăng hạng từ <b>Tân Binh</b> lên <b>Chiến Thần</b> & <b>Trùm Sách</b> để nhận đặc quyền bá đạo!
+                Tích lũy sách & tài liệu từ <b>Hạng 1 – Sứ Giả Sách Mới</b> đến <b>Hạng 5 – Huyền Thoại Tàng Kinh Các</b>
               </p>
             </div>
           </div>
@@ -53,101 +64,108 @@ export const HumorousTitlesGuideModal: React.FC<HumorousTitlesGuideModalProps> =
         {/* User Current Tier Status Card */}
         <div className="p-6 bg-gradient-to-r from-sky-900 via-blue-950 to-slate-900 text-white border-b border-slate-800">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5" /> Thành tích sinh viên của bạn
-              </span>
-              <div className="flex items-center gap-2.5 mt-1">
-                <h3 className="text-lg font-black text-white">
-                  {activeTab === 'seller' ? 'Chiến Thần Pass Sách K70' : 'Thần Đồng Ôn Thi Giờ Chót'}
-                </h3>
-                <span className="text-xs bg-white/10 px-2 py-0.5 rounded-full font-mono text-slate-300">
-                  {currentCount} {activeTab === 'seller' ? 'sách đã pass' : 'sách đã tậu'}
+            <div className="flex items-center gap-3.5 min-w-0">
+              <RankAvatar
+                src={userAvatar}
+                alt={userName}
+                tier={currentBadge?.tier ?? 0}
+                size="md"
+                fallbackText={userName.slice(0, 2).toUpperCase()}
+              />
+              <div className="min-w-0">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5" /> Thành tích UniDoc của bạn
                 </span>
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  <h3 className="text-base sm:text-lg font-black text-white">
+                    {currentBadge
+                      ? `Hạng ${currentBadge.tier} – ${currentBadge.name}`
+                      : 'Chưa có danh hiệu'}
+                  </h3>
+                  <span className="text-xs bg-white/10 px-2.5 py-0.5 rounded-full font-mono text-slate-200">
+                    {totalBooksCount > 0
+                      ? `${totalBooksCount} sách/tài liệu`
+                      : 'Chưa có hoạt động'}
+                  </span>
+                </div>
+                {currentBadge?.avatarFrameLabel && (
+                  <p className="text-[11px] text-sky-200 mt-1">
+                    Đang trang bị: <b>{currentBadge.avatarFrameLabel}</b>
+                  </p>
+                )}
               </div>
             </div>
 
             {/* Quick stats & progress to next tier */}
-            <div className="w-full sm:w-60 bg-white/10 rounded-xl p-3 border border-white/15">
+            <div className="w-full sm:w-64 bg-white/10 rounded-xl p-3 border border-white/15 shrink-0">
               <div className="flex justify-between text-xs mb-1 font-semibold">
                 <span className="text-slate-300">Tiến độ thăng hạng:</span>
                 <span className="text-amber-300">
-                  {activeTab === 'seller' ? '5/6 cuốn (83%)' : '6/10 cuốn (60%)'}
+                  {totalBooksCount === 0
+                    ? 'Chưa bắt đầu'
+                    : nextBadge
+                    ? `${totalBooksCount}/${nextBadge.minThreshold} cuốn (${progressPercent}%)`
+                    : 'Đã đạt Hạng tối đa'}
                 </span>
               </div>
               <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-amber-400 to-orange-500 rounded-full"
-                  style={{ width: activeTab === 'seller' ? '83%' : '60%' }}
+                  className="h-full bg-gradient-to-r from-amber-400 to-orange-500 rounded-full transition-all duration-300"
+                  style={{ width: `${progressPercent}%` }}
                 />
               </div>
               <p className="text-[10px] text-slate-300 mt-1 italic">
-                {activeTab === 'seller'
-                  ? 'Chỉ cần pass thêm 1 cuốn để lên Tier 2!'
-                  : 'Cần tậu thêm 4 cuốn để mở khóa Tier 3!'}
+                {totalBooksCount === 0
+                  ? 'Hãy mua hàng hoặc đăng bán sách ngay để tích điểm uy tín và mở khóa Hạng 1 – Sứ Giả Sách Mới!'
+                  : nextBadge
+                  ? `Cần thêm ${remainingCount} sách/tài liệu để lên Hạng ${nextBadge.tier} – ${nextBadge.name}!`
+                  : 'Chúc mừng! Bạn đã đạt Hạng 5 và được vinh danh vĩnh viễn trên Bảng Vàng UniDoc!'}
               </p>
             </div>
           </div>
         </div>
 
-        {/* Tab selection */}
-        <div className="flex border-b border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900 px-6 pt-3">
-          <button
-            onClick={() => setActiveTab('seller')}
-            className={`pb-3 px-4 font-bold text-sm transition-all border-b-2 flex items-center gap-2 cursor-pointer ${
-              activeTab === 'seller'
-                ? 'border-sky-500 text-sky-600 dark:text-sky-400 font-black'
-                : 'border-transparent text-slate-500 dark:text-zinc-300 hover:text-slate-700 dark:hover:text-white'
-            }`}
-          >
-            <span>Danh Hiệu Người Bán (Pass Sách)</span>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-sky-100 dark:bg-sky-950/70 text-sky-700 dark:text-sky-300 font-extrabold">
-              5 Hạng
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('buyer')}
-            className={`pb-3 px-4 font-bold text-sm transition-all border-b-2 flex items-center gap-2 cursor-pointer ${
-              activeTab === 'buyer'
-                ? 'border-blue-500 text-blue-600 dark:text-blue-400 font-black'
-                : 'border-transparent text-slate-500 dark:text-zinc-300 hover:text-slate-700 dark:hover:text-white'
-            }`}
-          >
-            <span>Danh Hiệu Người Mua (Săn Tri Thức)</span>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 font-extrabold">
-              5 Hạng
-            </span>
-          </button>
-        </div>
-
-        {/* Tier list */}
-        <div className="p-6 space-y-4">
-          {currentBadges.map((badge) => {
-            const isUnlocked = currentCount >= badge.minThreshold;
+        {/* Tier list (5 Tiers) */}
+        <div className="p-5 sm:p-6 space-y-4">
+          {UNIDOC_RANK_BADGES.map((badge) => {
+            const isUnlocked = totalBooksCount >= badge.minThreshold;
+            const isLegendary = badge.tier === 5;
+            const isPlatinum = badge.tier === 4;
 
             return (
               <div
                 key={badge.id}
-                className={`p-4 rounded-2xl border transition-all duration-200 relative overflow-hidden ${
-                  isUnlocked
-                    ? 'bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 shadow-xs hover:shadow-md'
-                    : 'bg-slate-50/70 dark:bg-zinc-900/50 border-dashed border-slate-200 dark:border-zinc-800 opacity-80'
+                className={`p-4 sm:p-5 rounded-2xl border transition-all duration-200 relative overflow-hidden ${
+                  isLegendary
+                    ? isUnlocked
+                      ? 'bg-gradient-to-br from-amber-50 via-yellow-50/70 to-orange-50 dark:from-amber-950/30 dark:via-zinc-900 dark:to-orange-950/25 border-amber-400 shadow-lg shadow-amber-500/15'
+                      : 'bg-gradient-to-br from-amber-50/50 via-white to-orange-50/40 dark:from-zinc-900/90 dark:to-zinc-950 border-amber-300/80 dark:border-amber-700/60'
+                    : isPlatinum
+                    ? 'bg-gradient-to-br from-sky-50/70 via-white to-cyan-50/50 dark:from-sky-950/25 dark:via-zinc-900 dark:to-zinc-950 border-cyan-300 dark:border-cyan-700/70 shadow-xs'
+                    : isUnlocked
+                    ? 'bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 shadow-xs'
+                    : 'bg-slate-50/70 dark:bg-zinc-900/50 border-dashed border-slate-200 dark:border-zinc-800'
                 }`}
               >
-                {/* Tier Number Pill */}
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-2xl shadow-inner shrink-0">
-                      {badge.icon}
-                    </div>
+                  <div className="flex items-center gap-3.5">
+                    {/* Live preview of the Rank Avatar Frame */}
+                    <RankAvatar
+                      src={userAvatar}
+                      alt={`Khung ${badge.name}`}
+                      tier={badge.tier}
+                      size="sm"
+                      fallbackText={badge.icon}
+                    />
 
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs uppercase font-extrabold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-200">
-                          Tier {badge.tier}/5
+                        <span className="text-xs uppercase font-extrabold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-zinc-800 text-slate-800 dark:text-zinc-200">
+                          Hạng {badge.tier}
                         </span>
-                        <h4 className="text-base font-black text-slate-900 dark:text-white">{badge.name}</h4>
+                        <h4 className="text-base font-black text-slate-900 dark:text-white">
+                          {badge.name}
+                        </h4>
                         {isUnlocked ? (
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300">
                             ✓ Đã mở khóa
@@ -159,22 +177,43 @@ export const HumorousTitlesGuideModal: React.FC<HumorousTitlesGuideModalProps> =
                         )}
                       </div>
 
-                      <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">{badge.description}</p>
+                      <p className="text-xs font-bold text-[#0860c9] dark:text-sky-400 mt-0.5">
+                        {badge.milestoneLabel || badge.description}
+                      </p>
                     </div>
                   </div>
 
                   <HumorousBadge badge={badge} size="sm" interactive={false} />
                 </div>
 
-                {/* Funny Quote */}
-                <div className="mt-3 p-2.5 rounded-xl bg-slate-50 dark:bg-zinc-950 text-xs italic text-slate-700 dark:text-zinc-300 border border-slate-100 dark:border-zinc-800">
-                  {badge.funnyQuote}
-                </div>
-
-                {/* Perk */}
-                <div className="mt-2.5 flex items-center gap-2 text-xs font-semibold text-amber-700 dark:text-amber-300 bg-amber-50/80 dark:bg-amber-950/40 px-3 py-1.5 rounded-xl border border-amber-200/60 dark:border-amber-800/50">
-                  <Zap className="w-4 h-4 text-amber-500 shrink-0" />
-                  <span>Đặc quyền sinh viên: <b>{badge.perk}</b></span>
+                {/* Perks list */}
+                <div
+                  className={`mt-3.5 p-3 rounded-xl border space-y-1.5 ${
+                    isLegendary
+                      ? 'bg-amber-100/60 dark:bg-amber-950/40 border-amber-300/80 dark:border-amber-700/60'
+                      : isPlatinum
+                      ? 'bg-sky-100/50 dark:bg-sky-950/35 border-cyan-200 dark:border-cyan-800/60'
+                      : 'bg-amber-50/70 dark:bg-zinc-950/80 border-amber-200/60 dark:border-zinc-800'
+                  }`}
+                >
+                  <div className="text-[11px] font-extrabold uppercase tracking-wider text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                    {isLegendary ? (
+                      <Crown className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                    ) : (
+                      <Award className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                    )}
+                    <span>
+                      {badge.tier === 2 ? 'Đặc quyền sinh viên:' : 'Đặc quyền:'}
+                    </span>
+                  </div>
+                  <ul className="space-y-1 text-xs text-slate-800 dark:text-zinc-200 font-medium">
+                    {(badge.perks || [badge.perk]).map((perkItem, idx) => (
+                      <li key={idx} className="flex items-start gap-2">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                        <span>{perkItem}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               </div>
             );
